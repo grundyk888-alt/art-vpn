@@ -1,0 +1,29 @@
+name: Source build and isolated regressions
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows-source:
+    runs-on: windows-2022
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9
+        with:
+          dotnet-version: 10.0.400
+      - name: Build components and run bounded fixtures
+        shell: pwsh
+        run: ./build/Build-Source.ps1 -OutputRoot "$env:RUNNER_TEMP/art-vpn-source-check"
+      - name: Retain non-secret fixture evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: isolated-fixture-results
+          path: ${{ runner.temp }}/art-vpn-source-check/fixture-results.json
+          retention-days: 7
+          if-no-files-found: error
