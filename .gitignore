@@ -1,0 +1,15 @@
+**/bin/
+**/obj/
+artifacts/
+.build/
+*.pfx
+*.p12
+*.key
+*.dpapi
+*.credential.xml
+*.entropy
+*.user
+*.suo
+provider.json
+subscription.txt
+support-report*.json
