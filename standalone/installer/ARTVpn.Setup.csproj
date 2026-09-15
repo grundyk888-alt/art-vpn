@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>ARTVpn.Setup</AssemblyName>
+    <RootNamespace>ArtSport.ArtVpn.Setup</RootNamespace>
+    <Version>0.1.0</Version>
+    <Company>ARTSPORT</Company>
+    <Product>ART VPN</Product>
+    <Title>Установка ART VPN</Title>
+    <Description>Установка ART VPN для ChatGPT, YouTube и других сервисов</Description>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>..\..\ui\Assets\art-monitor.ico</ApplicationIcon>
+    <DebugType>embedded</DebugType>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="..\..\integration\CodexProxyCompatibility.cs" Link="Shared\CodexProxyCompatibility.cs" />
+    <Compile Include="..\..\integration\MicrosoftAuthProxyCompatibility.cs" Link="Shared\MicrosoftAuthProxyCompatibility.cs" />
+    <Compile Include="..\..\integration\NativeUiHostBinding.cs" Link="Shared\NativeUiHostBinding.cs" />
+    <Compile Include="..\common\SystemProxyLease.cs" Link="Common\SystemProxyLease.cs" />
+    <Compile Include="..\common\QuattroRecommendation.cs" Link="Common\QuattroRecommendation.cs" />
+    <EmbeddedResource Include="$(PayloadBundlePath)" LogicalName="ARTVpn.Payload.zip"
+                      Condition="'$(PayloadBundlePath)' != '' and Exists('$(PayloadBundlePath)')" />
+  </ItemGroup>
+</Project>
