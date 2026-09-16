@@ -32,7 +32,8 @@ internal static class CoreQualificationEngine
         CancellationToken cancellationToken,
         bool quickConnect = false)
     {
-        var assets = await BypassRuleRefresh.ForCandidateAsync(options, cancellationToken).ConfigureAwait(false);
+        var assets = await BypassRuleRefresh.ForCandidateAsync(options, cancellationToken,
+            deferRefresh: quickConnect).ConfigureAwait(false);
         var material = StagedGenerationReader.Open(options, staged);
         var runtimeProbeConfigPath = PreparePrivateProbeRuntimeConfig(material);
         await CoreProcessLease.CheckConfigAsync(assets.CorePath, runtimeProbeConfigPath, cancellationToken)
@@ -55,7 +56,7 @@ internal static class CoreQualificationEngine
                 material.Manifest, incumbent,
                 (nodes, token) => NodeQualificationRunner.RunAsync(nodes, 1, 262_144, 8, run, token),
                 (nodes, token) => NodeQualificationRunner.RunAsync(nodes, 6, 262_144, 4, run, token),
-                cancellationToken).ConfigureAwait(false);
+                cancellationToken, bootstrapOnly: true).ConfigureAwait(false);
         }
         else
         {
@@ -71,7 +72,8 @@ internal static class CoreQualificationEngine
             PrefilterSummary.Create(staged.GenerationId, prefilter));
         AtomicFile.WriteJson(Path.Combine(material.GenerationRoot, "deep-summary.v1.json"),
             PrefilterSummary.Create(staged.GenerationId, deep, "deep"));
-        var pool = QualificationPolicy.Select(testedNodes, deep, incumbent, maximum: 12);
+        var pool = QualificationPolicy.Select(testedNodes, deep, incumbent,
+            requiredRounds: quickConnect ? 1 : 6, maximum: 12);
 
         var slot = active?.Slot == "A" ? "B" : "A";
         var proxyPort = slot == "A" ? 22086 : 22087;
@@ -238,8 +240,26 @@ internal sealed class CoreProcessLease : ICoreLease
     {
         cancellationToken.ThrowIfCancellationRequested();
         ValidateLaunchPaths(corePath, configPath);
-        using var process = NewProcess(corePath, "check", configPath);
-        await CheckProcessAsync(process, TimeSpan.FromSeconds(20), cancellationToken).ConfigureAwait(false);
+        await CheckWithRetryAsync(async token =>
+        {
+            using var process = NewProcess(corePath, "check", configPath);
+            await CheckProcessAsync(process, TimeSpan.FromSeconds(20), token).ConfigureAwait(false);
+        }, token => Task.Delay(1_000, token), cancellationToken).ConfigureAwait(false);
+    }
+
+    internal static async Task CheckWithRetryAsync(Func<CancellationToken, Task> check,
+        Func<CancellationToken, Task> delay, CancellationToken token)
+    {
+        token.ThrowIfCancellationRequested();
+        try { await check(token).ConfigureAwait(false); }
+        catch (InvalidDataException ex) when (ex.Message == "CoreCheckTimedOut" && !token.IsCancellationRequested)
+        {
+            // A cold launch/temporary contention is not an invalid subscription.
+            // The first owned check process has already been reaped; retry once.
+            await delay(token).ConfigureAwait(false);
+            token.ThrowIfCancellationRequested();
+            await check(token).ConfigureAwait(false);
+        }
     }
 
     internal static async Task CheckProcessAsync(Process process, TimeSpan maximumDuration,

@@ -7,6 +7,28 @@ internal static class ShutdownLifetimeTests
     public static async Task<object> RunAsync()
     {
         var cases = new List<string>();
+        var checkAttempts = 0; var checkDelays = 0;
+        await CoreProcessLease.CheckWithRetryAsync(_ => ++checkAttempts == 1
+            ? Task.FromException(new InvalidDataException("CoreCheckTimedOut")) : Task.CompletedTask,
+            _ => { checkDelays++; return Task.CompletedTask; }, CancellationToken.None);
+        Assert(checkAttempts == 2 && checkDelays == 1, "TransientConfigTimeoutRetriesOnce");
+        checkAttempts = checkDelays = 0;
+        var permanentRejected = false;
+        try
+        {
+            await CoreProcessLease.CheckWithRetryAsync(_ => { checkAttempts++; return Task.FromException(new InvalidDataException("CoreCheckTimedOut")); },
+                _ => { checkDelays++; return Task.CompletedTask; }, CancellationToken.None);
+        }
+        catch (InvalidDataException ex) when (ex.Message == "CoreCheckTimedOut") { permanentRejected = true; }
+        Assert(permanentRejected && checkAttempts == 2 && checkDelays == 1, "PersistentConfigTimeoutStillRejectedAfterBoundedRetry");
+        checkAttempts = 0;
+        try
+        {
+            await CoreProcessLease.CheckWithRetryAsync(_ => { checkAttempts++; return Task.FromException(new InvalidDataException("CoreConfigRejected")); },
+                _ => Task.CompletedTask, CancellationToken.None);
+        }
+        catch (InvalidDataException ex) when (ex.Message == "CoreConfigRejected") { }
+        Assert(checkAttempts == 1, "InvalidConfigNeverRetriedAsTransientTimeout");
         var stopping = new CancellationTokenSource();
         var previousToken = stopping.Token;
         var lateFailure = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);

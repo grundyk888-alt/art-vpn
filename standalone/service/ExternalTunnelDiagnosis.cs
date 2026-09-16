@@ -33,6 +33,20 @@ internal static class ExternalTunnelDiagnosis
         (name + " " + description).Contains("throne", StringComparison.OrdinalIgnoreCase) ||
         (name + " " + description).Contains("sing-box", StringComparison.OrdinalIgnoreCase);
 
+    internal static bool HappOwnsRoute()
+    {
+        try
+        {
+            var indices = NetworkInterface.GetAllNetworkInterfaces()
+                .Where(n => n.OperationalStatus == OperationalStatus.Up &&
+                    (n.Name + " " + n.Description).Contains("happ", StringComparison.OrdinalIgnoreCase))
+                .Select(n => n.GetIPProperties().GetIPv4Properties()?.Index ?? -1).ToHashSet();
+            return GetBestInterface(BitConverter.ToUInt32(IPAddress.Parse("1.1.1.1").GetAddressBytes()), out var index) == 0 &&
+                indices.Contains((int)index);
+        }
+        catch { return false; } // Unknown ownership never authorizes disconnect.
+    }
+
     [DllImport("iphlpapi.dll", ExactSpelling = true)]
     private static extern uint GetBestInterface(uint destination, out uint interfaceIndex);
 }

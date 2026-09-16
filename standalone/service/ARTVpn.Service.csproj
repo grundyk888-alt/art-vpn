@@ -20,6 +20,7 @@
     <DefaultItemExcludes>$(DefaultItemExcludes);obj\**;bin\**</DefaultItemExcludes>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="..\common\UpdateJson.cs" Link="Common\UpdateJson.cs" />
     <Compile Include="..\..\integration\MicrosoftAuthProxyCompatibility.cs" Link="Shared\MicrosoftAuthProxyCompatibility.cs" />
     <Compile Include="..\common\ExternalProxyEndpoint.cs" Link="Common\ExternalProxyEndpoint.cs" />
     <Compile Include="..\common\ConnectionProblemText.cs" Link="Common\ConnectionProblemText.cs" />

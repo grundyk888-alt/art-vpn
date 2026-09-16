@@ -20,6 +20,7 @@ internal sealed class RouteModeControl
     private readonly Func<int, CancellationToken, Task<bool>> _probe;
     private readonly Action<string, RouteModeState> _writeState;
     private readonly Func<string?> _externalTunnel;
+    private readonly IHappRouteSession? _happ;
     private readonly SemaphoreSlim _operation = new(1, 1);
     private volatile RouteModeState? _state;
     private int _pending;
@@ -27,7 +28,8 @@ internal sealed class RouteModeControl
 
     public RouteModeControl(RuntimeOptions options, string owner, ISystemProxyStore store,
         Func<int, CancellationToken, Task<bool>> probe,
-        Action<string, RouteModeState>? writeState = null, Func<string?>? externalTunnel = null)
+        Action<string, RouteModeState>? writeState = null, Func<string?>? externalTunnel = null,
+        IHappRouteSession? happ = null)
     {
         _options = options;
         _owner = SystemProxyLeaseCoordinator.ValidateOwnerSid(owner);
@@ -35,9 +37,13 @@ internal sealed class RouteModeControl
         _probe = probe;
         _writeState = writeState ?? ((path, value) => AtomicFile.ReplaceJson(path, value));
         _externalTunnel = externalTunnel ?? (() => null);
+        _happ = happ;
     }
 
     public string Mode => Current.Mode;
+    public ExternalProxyEndpoint? SelectedExternal => ExternalProxyEndpoint.ForMode(Mode) ??
+        (Mode == "Auto" && Current.Expected.ProxyEnable == 1
+            ? ExternalProxyEndpoint.ForPort(ExternalProxyEndpoint.KnownProxyPort(Current.Expected.ProxyServer)) : null);
     public int ExternalReservePort => (ExternalProxyEndpoint.ForMode(Current.ReserveClient) ?? ExternalProxyEndpoint.Throne).Port;
     public bool ManualRequestPending => Volatile.Read(ref _pending) != 0;
     public RouteModeState Current => _state ??= Load();
@@ -50,7 +56,7 @@ internal sealed class RouteModeControl
             {
                 var state = Current;
                 return state.Phase == "Committed" && state.Mode is "Auto" or "ArtVpn" or "Standby" &&
-                    _store.Read() == state.Expected;
+                    _store.Read() == state.Expected && SelectedExternal is null && _externalTunnel() is null;
             }
             catch { return false; }
         }
@@ -127,7 +133,7 @@ internal sealed class RouteModeControl
 
     public async Task<RouteModeResult> SelectAsync(string requestId, string mode,
         Func<CancellationToken, Task<bool>> prepareArt, CancellationToken cancellationToken,
-        bool rememberObservedReserve = false)
+        bool rememberObservedReserve = false, bool automaticFallback = false)
     {
         if (mode is not ("Auto" or "ArtVpn" or "Throne" or "Happ"))
             return new("Rejected", "ControllerModeRejected", Mode, false);
@@ -143,9 +149,12 @@ internal sealed class RouteModeControl
             var previousState = Current;
             var before = _store.Read();
             var previousLease = ReadLease();
+            if (automaticFallback && (previousState.Mode != "Auto" || previousState.Expected != before))
+                return new("Rejected", "ManualChoicePreserved", previousState.Mode, false);
             if (!string.IsNullOrWhiteSpace(before.AutoConfigUrl))
                 return new("Rejected", "SystemProxyPacConflict", previousState.Mode, false);
-            if (mode is "Auto" or "ArtVpn" && _externalTunnel() is { } tunnelCode)
+            var releaseHapp = mode is "Auto" or "ArtVpn" or "Throne" && _happ is { Available: true, OwnsTunnel: true };
+            if (mode is "Auto" or "ArtVpn" && _externalTunnel() is { } tunnelCode && !releaseHapp)
                 return new("Rejected", tunnelCode, previousState.Mode, false);
             var external = ExternalProxyEndpoint.ForMode(mode);
             var targetPort = external?.Port ?? 22080;
@@ -163,11 +172,23 @@ internal sealed class RouteModeControl
             DecisionJournal.Write(_options.DataRoot, requestId, mode, "Prepared");
             var wroteLease = false;
             var changed = false;
+            var baseline = before;
+            var handover = _happ is null ? null : new HappRouteHandover(_options, _store, _happ);
             try
             {
+                // An already healthy proxy-mode HAPP does not need a native
+                // reconnect (some clients ignore connect while already on).
+                var startHapp = mode == "Happ" && _happ is { Available: true, OwnsTunnel: false } &&
+                    !await _probe(10809, cancellationToken).ConfigureAwait(false);
+                if (releaseHapp || startHapp)
+                {
+                    baseline = await handover!.ChangeAsync(requestId, mode == "Happ", before, cancellationToken).ConfigureAwait(false);
+                    changed = baseline != before;
+                }
                 if (external is null && !await prepareArt(cancellationToken).ConfigureAwait(false))
                     throw new InvalidOperationException("StableFrontNotReady");
                 var reserve = external?.Mode ?? previousState.ReserveClient;
+                if (handover?.Released == true) reserve = "Happ";
                 // First-run handover remembers an already working external
                 // endpoint only after a real probe, never merely an open port.
                 var observedReserve = before.ProxyEnable == 1
@@ -175,9 +196,15 @@ internal sealed class RouteModeControl
                 if (rememberObservedReserve && mode == "Auto" && observedReserve is not null &&
                     await _probe(observedReserve.Port, cancellationToken).ConfigureAwait(false))
                     reserve = observedReserve.Mode;
-                if (!await _probe(targetPort, cancellationToken).ConfigureAwait(false))
+                var preflightReady = handover?.CanRetryStart == true
+                    ? await HappWarmupRetry.ConfirmAsync(
+                        (attempt, token) => ProbeForSelectionAsync(targetPort, true, token, attempt == 1 ? 30 : 45),
+                        async token => { baseline = await handover.RetryFailedStartAsync(token).ConfigureAwait(false); },
+                        cancellationToken).ConfigureAwait(false)
+                    : await ProbeForSelectionAsync(targetPort, handover?.Started == true, cancellationToken).ConfigureAwait(false);
+                if (!preflightReady)
                     throw new InvalidOperationException("SelectedRoutePreflightFailed");
-                if (_store.Read() != before) throw new InvalidOperationException("SystemProxyChangedDuringCheck");
+                if (_store.Read() != baseline) throw new InvalidOperationException("SystemProxyChangedDuringCheck");
                 if (external is null && _externalTunnel() is { } appearedTunnel)
                     throw new InvalidOperationException(appearedTunnel);
                 // A bypass-only edit does not make our own endpoint a valid
@@ -189,14 +216,14 @@ internal sealed class RouteModeControl
                     original, expected, pending.AtUtc, "", false);
                 SystemProxyLeaseCoordinator.WriteLease(_options.SystemProxyLeasePath, lease);
                 wroteLease = true;
-                if (_store.Read() != before) throw new InvalidOperationException("SystemProxyChangedBeforeCommit");
+                if (_store.Read() != baseline) throw new InvalidOperationException("SystemProxyChangedBeforeCommit");
                 cancellationToken.ThrowIfCancellationRequested();
-                if (before != expected)
+                if (baseline != expected)
                 {
                     _store.Write(expected);
                     changed = true;
                     if (_store.Read() != expected) throw new InvalidOperationException("SystemProxyApplyNotVerified");
-                    if (!await _probe(targetPort, cancellationToken).ConfigureAwait(false))
+                    if (!await ProbeForSelectionAsync(targetPort, handover?.Started == true, cancellationToken).ConfigureAwait(false))
                         throw new InvalidOperationException("SelectedRoutePostflightFailed");
                 }
                 if (_store.Read() != expected) throw new InvalidOperationException("SystemProxyChangedAfterCommit");
@@ -205,9 +232,10 @@ internal sealed class RouteModeControl
                     Phase = "Applied", AppliedAtUtc = DateTimeOffset.UtcNow.ToString("o")
                 });
                 var committed = pending with { Phase = "Committed", PreviousMode = "", PreviousExpected = null,
-                    ReserveClient = reserve };
+                    ReserveClient = reserve, Mode = automaticFallback ? "Auto" : mode };
                 _writeState(StatePath, committed);
                 _state = committed;
+                try { handover?.Complete(); } catch { SafeLog.Write(_options.DataRoot, "HappReceiptCleanupPending"); }
                 DecisionJournal.Write(_options.DataRoot, requestId, mode, "Committed");
                 return new("Completed", changed ? "SelectedRouteVerified" : "SelectedRouteAlreadyVerified", mode, changed);
             }
@@ -216,10 +244,28 @@ internal sealed class RouteModeControl
                 var code = ErrorCodes.From(ex);
                 try
                 {
+                    var rollbackRouteUnconfirmed = false;
                     var current = _store.Read();
                     // A registry key cannot supply a cross-program atomic CAS;
                     // check ownership immediately before every restoration.
-                    if (wroteLease && current == expected && current != before) _store.Write(before);
+                    if (wroteLease && current == expected && current != baseline) _store.Write(baseline);
+                    if (handover is not null)
+                    {
+                        var verifyHappReturn = handover.Released;
+                        using var recovery = new CancellationTokenSource(TimeSpan.FromSeconds(65));
+                        await handover.RollbackAsync(recovery.Token).ConfigureAwait(false);
+                        // A native connect acknowledgement proves neither TLS
+                        // nor internet access. Warm up the returned client before
+                        // describing the previous connection as restored.
+                        if (verifyHappReturn)
+                        {
+                            try
+                            {
+                                rollbackRouteUnconfirmed = !await ProbeForSelectionAsync(10809, true, recovery.Token).ConfigureAwait(false);
+                            }
+                            catch { rollbackRouteUnconfirmed = true; }
+                        }
+                    }
                     if (_store.Read() == before)
                     {
                         if (wroteLease)
@@ -227,7 +273,9 @@ internal sealed class RouteModeControl
                             if (previousLease is null) File.Delete(_options.SystemProxyLeasePath);
                             else SystemProxyLeaseCoordinator.WriteLease(_options.SystemProxyLeasePath, previousLease);
                         }
-                        _state = previousState.Expected == before ? previousState : NewState("External", before);
+                        _state = !rollbackRouteUnconfirmed && previousState.Expected == before
+                            ? previousState : NewState("External", before);
+                        if (rollbackRouteUnconfirmed) code = "HappRollbackRouteUnconfirmed";
                         _writeState(StatePath, _state);
                     }
                     else
@@ -247,6 +295,40 @@ internal sealed class RouteModeControl
             }
         }
         finally { Interlocked.Exchange(ref _pending, 0); _operation.Release(); }
+    }
+
+    private async Task<bool> ProbeForSelectionAsync(int port, bool warmingClient, CancellationToken token, int seconds = 65)
+    {
+        if (!warmingClient) return await _probe(port, token).ConfigureAwait(false);
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
+        deadline.CancelAfter(TimeSpan.FromSeconds(seconds));
+        try
+        {
+            while (true)
+            {
+                if (await _probe(port, deadline.Token).ConfigureAwait(false)) return true;
+                await Task.Delay(750, deadline.Token).ConfigureAwait(false);
+            }
+        }
+        catch (OperationCanceledException) when (!token.IsCancellationRequested && deadline.IsCancellationRequested)
+        { return false; } // A warmup timeout is a failed check, not an opaque InternalFailure.
+    }
+
+    internal Task RecoverHandoverAsync(CancellationToken token) => _happ is null ? Task.CompletedTask :
+        new HappRouteHandover(_options, _store, _happ).RecoverAsync(token);
+
+    internal async Task<RouteModeResult> RestorePreviousAsync(CancellationToken token)
+    {
+        var lease = ReadLease();
+        if (_happ is not null && lease is not null && HappRouteHandover.IsHapp(lease.Previous) &&
+            (_store.Read() == lease.Applied || SystemProxyLeaseCoordinator.RestoreAfterBypassOnlyChange(lease, _store.Read()) is not null))
+        {
+            if (!_happ.Available && !await _probe(10809, token).ConfigureAwait(false))
+                return new("Rejected", "HappControlUnavailable", Mode, false);
+            var result = await SelectAsync(Guid.NewGuid().ToString("N"), "Happ", _ => Task.FromResult(false), token).ConfigureAwait(false);
+            if (result.Status != "Completed") return result;
+        }
+        return RestorePrevious();
     }
 
     public RouteModeResult RestorePrevious()

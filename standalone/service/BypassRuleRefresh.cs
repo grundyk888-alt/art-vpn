@@ -58,11 +58,17 @@ internal static class BypassRuleRefresh
     public static async Task<VerifiedRuntimeAssets> ForCandidateAsync(RuntimeOptions options, CancellationToken cancellationToken,
         Func<string?, VerifiedRuntimeAssets>? openAssets = null,
         Func<Uri, int, CancellationToken, Task<byte[]>>? fetch = null,
-        DateTimeOffset? nowOverride = null)
+        DateTimeOffset? nowOverride = null, bool deferRefresh = false)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         openAssets ??= directory => RuntimeAssetVerifier.Open(options, rulesDirectory: directory);
         var bundled = openAssets(null);
         var previous = CurrentAssets(options, bundled);
+        // Initial connection needs verified local rules, not seven upstream
+        // update requests (up to 90 seconds without an existing VPN). Keep the
+        // active verified rules, or bundled rules on a clean install. The normal
+        // background refinement still downloads and validates updates in full.
+        if (deferRefresh) return previous;
         var now = nowOverride ?? DateTimeOffset.UtcNow;
         BypassRefreshReceipt? receipt = null;
         try { receipt = JsonSerializer.Deserialize<BypassRefreshReceipt>(File.ReadAllText(ReceiptPath(options)), JsonSettings.Strict); }

@@ -50,6 +50,22 @@ internal static class BypassRefreshTests
                 Check(uri.Host == "raw.githubusercontent.com" && uri.AbsolutePath.Contains("/"+new string('b',40)+"/"));
                 return Task.FromResult(updated.ToArray());
             }
+            var initial = await BypassRuleRefresh.ForCandidateAsync(options, default, Open, Fetch, now, deferRefresh: true);
+            Check(initial.RulesManifestSha256 == original.RulesManifestSha256 && calls == 0);
+            Check(!File.Exists(Path.Combine(options.DataRoot, "state", "bypass-refresh.v1.json")));
+            var invalidInitialRejected = false;
+            try { await BypassRuleRefresh.ForCandidateAsync(options, default,
+                _ => throw new InvalidDataException("FixtureBadBundledAssets"), Fetch, now, deferRefresh: true); }
+            catch (InvalidDataException ex) when (ex.Message == "FixtureBadBundledAssets") { invalidInitialRejected = true; }
+            Check(invalidInitialRejected && calls == 0);
+            using (var initialCanceled = new CancellationTokenSource())
+            {
+                initialCanceled.Cancel();
+                var stopped = false;
+                try { await BypassRuleRefresh.ForCandidateAsync(options, initialCanceled.Token, Open, Fetch, now, deferRefresh: true); }
+                catch (OperationCanceledException) { stopped = true; }
+                Check(stopped && calls == 0);
+            }
             var candidate = await BypassRuleRefresh.ForCandidateAsync(options, default, Open, Fetch, now);
             Check(candidate.Rules.Length == 4 && candidate.RulesManifestSha256 != original.RulesManifestSha256);
             Check(calls == 7); // three distinct repositories/branches, four payloads

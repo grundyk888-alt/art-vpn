@@ -94,7 +94,13 @@ internal static class NodeQualificationRunner
             ? Math.Sqrt(latencies.Select(value => Math.Pow(value - latencies.Average(), 2)).Average())
             : 0;
         var throughputFloor = throughputs.Length > 0 ? throughputs[0] : 0;
-        var score = p95 + jitter + (throughputFloor > 0 ? 1_000 / throughputFloor : 100_000);
+        // Route preference is for Codex / ChatGPT, not an unrelated endpoint.
+        // Telegram and payload integrity remain mandatory admission checks.
+        var aiLatencies = samples.SelectMany(sample => new[] { sample.OpenAiMs, sample.ChatGptMs })
+            .Where(value => value > 0).Order().ToArray();
+        var aiJitter = aiLatencies.Length > 1
+            ? Math.Sqrt(aiLatencies.Select(value => Math.Pow(value - aiLatencies.Average(), 2)).Average()) : 0;
+        var score = Percentile(aiLatencies, 0.95) + aiJitter + (throughputFloor > 0 ? 1_000 / throughputFloor : 100_000);
         double Pct(Func<ProbeRoundSample, bool> predicate) => Math.Round(samples.Count(predicate) * 100d / rounds, 3);
         var failure = samples.Select(sample => sample.FailureClass).FirstOrDefault(value => value != "Passed") ?? "Passed";
         var clean = !tls && hardFailures <= allowedTransientFailures &&

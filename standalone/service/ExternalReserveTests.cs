@@ -72,6 +72,48 @@ internal static class ExternalReserveTests
             Check(status.Country == client.DisplayName && status.Mode == "Авто" && status.Health == "Fallback",
                 client.Mode + "-auto-status-names-actual-external");
         }
+        // ART is the default working route, not dependent on the optional
+        // reserve being started. A remembered reserve is only a preference;
+        // it is never evidence that its process or connection is ready.
+        foreach (var client in new[] { ExternalProxyEndpoint.Throne, ExternalProxyEndpoint.Happ })
+        {
+            var options = RuntimeOptions.Test(Path.Combine(root, "art-first-" + client.Mode), "Fixture.ArtFirst." + client.Mode);
+            var store = new MemorySystemProxyStore(before);
+            var reserveReady = true;
+            var probes = new List<int>();
+            Task<bool> Probe(int port, CancellationToken _)
+            { probes.Add(port); return Task.FromResult(port == 22080 || (port == client.Port && reserveReady)); }
+            var route = new RouteModeControl(options, owner, store, Probe);
+            await route.SelectAsync("remember", client.Mode, Ready, CancellationToken.None);
+            reserveReady = false;
+            probes.Clear();
+            var auto = await route.SelectAsync("art-first", "Auto", Ready, CancellationToken.None);
+            Check(auto.Status == "Completed" && route.Mode == "Auto" && store.Current.ProxyServer == "127.0.0.1:22080" &&
+                probes.Count == 2 && probes.All(port => port == 22080),
+                client.Mode + "-inactive-reserve-does-not-block-art-auto");
+            route = new RouteModeControl(options, owner, store, Probe);
+            Check(route.Mode == "Auto" && route.AllowsBackgroundMutation && route.ExternalReservePort == client.Port,
+                client.Mode + "-reload-retains-art-auto-with-inactive-preferred-reserve");
+            var writes = store.Writes;
+            var unavailable = await route.SelectAsync("unavailable-manual", client.Mode, Ready, CancellationToken.None);
+            Check(unavailable.Status == "Rejected" && route.Mode == "Auto" && store.Writes == writes &&
+                store.Current.ProxyServer == "127.0.0.1:22080",
+                client.Mode + "-manual-unavailable-reserve-does-not-cut-working-art");
+            reserveReady = true;
+            var manual = await route.SelectAsync("manual-ready", client.Mode,
+                _ => throw new InvalidOperationException("ArtMustNotStartForManualReserve"), CancellationToken.None);
+            Check(manual.Status == "Completed" && route.Mode == client.Mode && !route.AllowsBackgroundMutation &&
+                store.Current.ProxyServer == $"127.0.0.1:{client.Port}",
+                client.Mode + "-manual-selection-suspends-art-auto-return");
+            var rejectedReturn = await route.SelectAsync("art-not-ready", "Auto", _ => Task.FromResult(false), CancellationToken.None);
+            Check(rejectedReturn.Status == "Rejected" && route.Mode == client.Mode &&
+                store.Current.ProxyServer == $"127.0.0.1:{client.Port}",
+                client.Mode + "-failed-art-return-preserves-working-manual-reserve");
+            var returned = await route.SelectAsync("art-ready", "Auto", Ready, CancellationToken.None);
+            Check(returned.Status == "Completed" && route.Mode == "Auto" && route.AllowsBackgroundMutation &&
+                store.Current.ProxyServer == "127.0.0.1:22080" && route.ExternalReservePort == client.Port,
+                client.Mode + "-explicit-auto-returns-to-art-and-remembers-reserve");
+        }
         // Migration: old route receipts without the optional preference still choose Throne.
         var legacyOptions = RuntimeOptions.Test(Path.Combine(root, "legacy"), "Fixture.Legacy");
         AtomicFile.ReplaceJson(Path.Combine(legacyOptions.DataRoot, "state", "route-mode.v1.json"), new
