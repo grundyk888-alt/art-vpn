@@ -30,5 +30,12 @@ points from the current commit. CI does not install a VPN, use live subscription
 change the runner network, sign a release or demonstrate an authenticated Codex
 conversation. Look at the actual run result for the relevant commit.
 
+Known behavior (AUTO-REFINE-140-01): interrupting background channel qualification
+with a manual VPN selection can defer the next deep search by 30-45 minutes.
+Returning to Auto does not force an immediate retry. Current-channel health checks
+continue independently. This delay was diagnosed in 1.0.40 and accepted by the
+release owner without a code change; automatic resumption was not yet observed in
+that diagnostic window. It is not a permanent-stop diagnosis or a fixed defect.
+
 Private VM logs, account details and subscriptions are not published. Never
 re-label an old receipt as proof of a newly built or signed installer.
