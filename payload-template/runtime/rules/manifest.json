@@ -1,0 +1,46 @@
+{
+  "source": "exact Throne 1.2.4 route-profile parity resolved from throneproj/routeprofiles srslist.h",
+  "policy": "immutable and hash-pinned; replacement requires isolated candidate validation",
+  "files": [
+    {
+      "tag": "art-geoip-ru",
+      "repository": "MetaCubeX/meta-rules-dat",
+      "branch": "sing",
+      "path": "geo/geoip/ru.srs",
+      "git_blob": "6a89238a2de451e5b0f442b326ca16b0143596d1",
+      "installed_name": "geoip-ru-8E2EA5596030.srs",
+      "bytes": 106188,
+      "sha256": "8E2EA55960301382FD9DFD3C3311E386C28CDCD1EF0DBBB9D83778D01316EE1F"
+    },
+    {
+      "tag": "art-geosite-category-ru",
+      "repository": "MetaCubeX/meta-rules-dat",
+      "branch": "sing",
+      "path": "geo/geosite/category-ru.srs",
+      "git_blob": "85def49e38c37e2da871e8cdc6e902102f7abbc5",
+      "installed_name": "geosite-category-ru-E229BA087FD3.srs",
+      "bytes": 7866,
+      "sha256": "E229BA087FD310F30EB16EAE6426C858733F2070C7393E59F50E80CA0B0992BE"
+    },
+    {
+      "tag": "art-geosite-ru",
+      "repository": "hiddify/hiddify-geo",
+      "branch": "rule-set",
+      "path": "country/geosite-ru.srs",
+      "git_blob": "07333047a9740d065b0d5337a801652e48489ff4",
+      "installed_name": "geosite-ru-2CDA8DB80483.srs",
+      "bytes": 14425,
+      "sha256": "2CDA8DB804832D825780D9F89BBD2F8B95D5E7EF802FD19EB83C61CDB2B655C8"
+    },
+    {
+      "tag": "art-geosite-ru-inside",
+      "repository": "runetfreedom/russia-v2ray-rules-dat",
+      "branch": "release",
+      "path": "sing-box/rule-set-geosite/geosite-ru-available-only-inside.srs",
+      "git_blob": "24e021df7b320f77723063d920d0cdf0c902bf20",
+      "installed_name": "geosite-ru-available-only-inside-D6BA57D47D19.srs",
+      "bytes": 1281,
+      "sha256": "D6BA57D47D190897A9F4445FD2D19E180DE1D97322BA2AB60C16AF6E05B49202"
+    }
+  ]
+}
