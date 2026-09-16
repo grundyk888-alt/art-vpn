@@ -17,6 +17,8 @@ internal sealed record InstallationFacts(bool WindowsSupported, long FreeBytes, 
 
 internal static class InstallationContinuation
 {
+    internal static bool CodexNeedsAction(string code) => code is not
+        ("Ready" or "NotConfigured" or "CodexNotFound" or "ExternalRoute" or "RouteUpdateSuggested" or "RestartSuggested");
     internal static bool Allowed(InstallationReport? report) => report is { CanInstall: true, SystemChanged: false, ContainsProviderSecret: false } &&
         report.Checks.Length > 0 && report.Checks.All(c => c.Level is "Info" or "Warning");
 
@@ -96,8 +98,8 @@ internal static class InstallationDiagnostics
             running, startup, integrated, before != ReadProxy());
         checks.AddRange(Evaluate(facts));
         var codex = ArtSport.Vpn.Shared.CodexProxyCompatibility.InspectCurrentUser(true);
-        checks.Add(new("CodexProxy", codex.Code is "Ready" or "NotConfigured" or "CodexNotFound" ? "Info" : "Warning",
-            "Настройки Codex", codex.Message, codex.Code is not ("Ready" or "NotConfigured" or "CodexNotFound")));
+        checks.Add(new("CodexProxy", InstallationContinuation.CodexNeedsAction(codex.Code) ? "Warning" : "Info",
+            "Настройки Codex", codex.Message, InstallationContinuation.CodexNeedsAction(codex.Code)));
         return new(DateTimeOffset.UtcNow, checks.ToArray(), checks.All(check => check.Level != "Blocked"));
     }
 

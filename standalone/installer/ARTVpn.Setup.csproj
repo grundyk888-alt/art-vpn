@@ -22,6 +22,7 @@
     <DebugType>embedded</DebugType>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="..\common\ProviderConnectionClient.cs" Link="Common\ProviderConnectionClient.cs" />
     <Compile Include="..\..\integration\CodexProxyCompatibility.cs" Link="Shared\CodexProxyCompatibility.cs" />
     <Compile Include="..\..\integration\MicrosoftAuthProxyCompatibility.cs" Link="Shared\MicrosoftAuthProxyCompatibility.cs" />
     <Compile Include="..\..\integration\NativeUiHostBinding.cs" Link="Shared\NativeUiHostBinding.cs" />

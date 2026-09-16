@@ -16,14 +16,17 @@ internal sealed class InstallationDiagnosticsForm : Form
     private readonly Button _save;
     private InstallationReport? _report;
     private readonly bool _beforeInstall;
+    private readonly string? _failureContext;
     internal bool ContinueRequested { get; private set; }
 
     internal InstallationDiagnosticsForm(string? payload, bool beforeInstall,
-        Func<CancellationToken, Task<InstallationReport>>? collect = null)
+        Func<CancellationToken, Task<InstallationReport>>? collect = null, InstallationReport? initialReport = null,
+        string? failureContext = null)
     {
         Name = "InstallationDiagnosticsForm";
         Text = "ART VPN — проверка компьютера";
         _beforeInstall = beforeInstall;
+        _failureContext = failureContext;
         _collect = collect ?? (token => InstallationDiagnostics.CollectAsync(payload, token));
         Font = new Font("Segoe UI", 10);
         BackColor = Color.FromArgb(246, 248, 252);
@@ -55,7 +58,11 @@ internal sealed class InstallationDiagnosticsForm : Form
         actions.Controls.AddRange([_repeat, _repair, _save, _continue]);
         layout.Controls.Add(actions, 0, 3);
         Controls.Add(layout);
-        Shown += async (_, _) => await RefreshAsync();
+        Shown += async (_, _) =>
+        {
+            if (initialReport is not null) { ApplyReport(initialReport); if (!IsDisposed) SetBusy(false); }
+            else await RefreshAsync();
+        };
         FormClosing += (_, _) => _lifetime.Cancel();
         SetBusy(true);
     }
@@ -77,20 +84,7 @@ internal sealed class InstallationDiagnosticsForm : Form
         {
             var report = await Task.Run(() => _collect(_lifetime.Token), _lifetime.Token);
             if (IsDisposed || _lifetime.IsCancellationRequested) return;
-            _report = report;
-            if (_beforeInstall && InstallationContinuation.Automatic(report))
-            {
-                ContinueRequested = true;
-                DialogResult = DialogResult.OK;
-                Close();
-                return;
-            }
-            _details.Text = string.Join("\r\n\r\n", report.Checks.Select(check =>
-                $"{(check.Level == "Blocked" ? "НУЖНО ИСПРАВИТЬ" : check.Level == "Warning" ? "ОБРАТИТЕ ВНИМАНИЕ" : "ПРОВЕРЕНО")} — {check.Title}\r\n{check.Message}"));
-            _status.Text = InstallationContinuation.Allowed(report) ?
-                report.Checks.Any(c => c.RequiresUserAction) ? "Есть настройка, требующая вашего решения. Проверьте замечания перед продолжением." :
-                "Блокирующих условий не обнаружено. Замечания выше не означают, что VPN не работает." :
-                "Есть препятствие для установки. Причина указана выше; текущая сеть сохранена.";
+            ApplyReport(report);
         }
         catch (OperationCanceledException) when (_lifetime.IsCancellationRequested) { }
         catch (Exception)
@@ -99,6 +93,28 @@ internal sealed class InstallationDiagnosticsForm : Form
                 _status.Text = "Не удалось завершить проверку. Установка не началась. Повторите диагностику; защиту отключать не нужно.";
         }
         finally { if (!IsDisposed && !_lifetime.IsCancellationRequested) SetBusy(false); }
+    }
+
+    private void ApplyReport(InstallationReport report)
+    {
+            _report = report;
+            if (_beforeInstall && InstallationContinuation.Automatic(report))
+            {
+                ContinueRequested = true;
+                DialogResult = DialogResult.OK;
+                Close();
+                return;
+            }
+            // Сбой предыдущего этапа не исчезает из окна, даже если проверка
+            // установки зелёная: она не доказывает работоспособность канала.
+            _details.Text = (_failureContext is null ? "" : "НЕ ЗАВЕРШЕНО — " + _failureContext + "\r\n\r\n") + string.Join("\r\n\r\n", report.Checks.Select(check =>
+                $"{(check.Level == "Blocked" ? "НУЖНО ИСПРАВИТЬ" : check.Level == "Warning" ? "ОБРАТИТЕ ВНИМАНИЕ" : "ПРОВЕРЕНО")} — {check.Title}\r\n{check.Message}"));
+            _status.Text = InstallationContinuation.Allowed(report) ?
+                report.Checks.Any(c => c.RequiresUserAction) ? "Есть настройка, требующая вашего решения. Проверьте замечания перед продолжением." :
+                "Блокирующих условий не обнаружено. Замечания выше не означают, что VPN не работает." :
+                "Есть препятствие для установки. Причина указана выше; текущая сеть сохранена.";
+            if (_failureContext is not null && InstallationContinuation.Allowed(report))
+                _status.Text = "Проверьте причину выше. После исправления закройте диагностику и нажмите «Повторить» в установщике.";
     }
 
     private async Task RepairAsync()

@@ -25,6 +25,13 @@ internal static class Program
         Application.SetCompatibleTextRenderingDefault(false);
         try
         {
+            if (args.Length == 2 && args[0] == "--setup-connection-test")
+            {
+                AtomicJson.Replace(args[1], new { status = "Passed", checks = SetupConnectionTests.Run(phase =>
+                    AtomicJson.Replace(args[1] + ".progress.json", new { phase, atUtc = DateTimeOffset.UtcNow, systemChanged = false })),
+                    systemChanged = false, actualInstallation = false, secretDisplayed = false });
+                return 0;
+            }
             if (args.Length == 1 && args[0] == "--diagnostics-test")
             {
                 Console.Out.WriteLine(JsonSerializer.Serialize(new { diagnostics = InstallationDiagnostics.Test(),
@@ -108,6 +115,18 @@ internal static class Program
                     ownerPayload.PayloadRoot, args[1], CancellationToken.None,
                     integrated: args[0] == "--integrated-owner").ConfigureAwait(false);
                 Console.Out.WriteLine(JsonSerializer.Serialize(result, JsonOptions.Output));
+                return result.Status == "Installed" ? 0 : 2;
+            }
+            if (args.Length == 4 && args[0] == "--update-owner")
+            {
+                // Update is not onboarding: keep the subscription and current
+                // selected channel, and use the existing rollback transaction.
+                using var updatePayload = SetupPayload.Open();
+                var package = PackageVerifier.Verify(updatePayload.PayloadRoot);
+                if (!File.Exists(@"C:\ProgramData\ART VPN\state\install.v1.json") ||
+                    package.Manifest.Version != args[2] || package.ManifestSha256 != args[3])
+                    throw new InvalidDataException("UpdatePayloadBindingRejected");
+                var result = await InstallTransaction.InstallAsync(updatePayload.PayloadRoot, args[1], CancellationToken.None);
                 return result.Status == "Installed" ? 0 : 2;
             }
             if (args.Length == 1 && args[0] == "--uninstall")
@@ -223,11 +242,33 @@ internal sealed class SetupForm : Form
     private readonly string _ownerSid;
     private readonly Button _install;
     private readonly Label _status;
+    private readonly TextBox _subscription;
+    private readonly CheckBox _later;
+    private readonly ISetupWorkflow _workflow;
+    private readonly Button _diagnose;
+    private readonly ProgressBar _progress;
+    private readonly Label _elapsed;
+    private readonly Panel _entryPage;
+    private readonly TableLayoutPanel _processPage;
+    private readonly Label _processTitle;
+    private readonly Label _entryExplanation;
+    private readonly Label[] _steps = new Label[4];
+    private readonly Button _back;
+    private int _activeStep;
+    private readonly System.Windows.Forms.Timer _progressTimer = new() { Interval = 250 };
+    private readonly Stopwatch _operationTime = new();
+    private readonly CancellationTokenSource _lifetime = new();
+    private bool _busy;
+    private bool _installed;
+    private bool _connected;
+    private bool _readyToOpen;
+    internal string ConnectionCode { get; private set; } = "NotAttempted";
     public bool Succeeded { get; private set; }
 
-    public SetupForm(string payload, Action<string>? openRecommendation = null)
+    public SetupForm(string payload, Action<string>? openRecommendation = null, ISetupWorkflow? workflow = null)
     {
         _payload = payload;
+        _workflow = workflow ?? new SetupWorkflow();
         _ownerSid = WindowsIdentity.GetCurrent().User?.Value ?? throw new InvalidOperationException("OwnerSidUnavailable");
         Text = "Установка ART VPN для ChatGPT, YouTube и других сервисов";
         Font = new Font("Segoe UI", 10);
@@ -237,7 +278,7 @@ internal sealed class SetupForm : Form
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false;
         AutoScaleMode = AutoScaleMode.Dpi;
-        ClientSize = new Size(650, 590);
+        ClientSize = new Size(650, 710);
         // Действие установки всегда доступно, даже если Windows ограничила
         // высоту окна на небольшом экране или при увеличенном масштабе.
         var layout = new TableLayoutPanel
@@ -247,17 +288,42 @@ internal sealed class SetupForm : Form
         };
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 142));
-        var content = new Panel { Dock = DockStyle.Fill, AutoScroll = true, Margin = Padding.Empty };
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 174));
+        var content = _entryPage = new Panel { Name = "SetupEntryPage", Dock = DockStyle.Fill, AutoScroll = true, Margin = Padding.Empty };
+        var pageHost = new Panel { Dock = DockStyle.Fill, Margin = Padding.Empty };
+        _processPage = new TableLayoutPanel { Name = "SetupProcessPage", Dock = DockStyle.Fill, Visible = false,
+            AutoScroll = true, Padding = new Padding(40, 24, 40, 18), ColumnCount = 1, RowCount = 6 };
+        _processPage.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        foreach (var height in new[] { 84, 72, 72, 72, 72, 94 }) _processPage.RowStyles.Add(new RowStyle(SizeType.Absolute, height));
+        _processTitle = new Label { Name = "SetupProcessTitle", Text = "Устанавливаем ART VPN", Font = new Font("Segoe UI Semibold", 22), Dock = DockStyle.Fill };
+        _processPage.Controls.Add(_processTitle, 0, 0);
+        for (var i = 0; i < _steps.Length; i++)
+        {
+            _steps[i] = new Label { Name = "SetupProcessStep" + i, Dock = DockStyle.Fill, AutoSize = false,
+                Font = new Font("Segoe UI", 11), Padding = new Padding(12, 8, 8, 4), Margin = new Padding(0, 0, 0, 8), BackColor = Color.White };
+            _processPage.Controls.Add(_steps[i], 0, i + 1);
+        }
+        _processPage.Controls.Add(new Label { Name = "SetupProcessNote", Dock = DockStyle.Fill, Font = new Font("Segoe UI", 9.5f),
+            ForeColor = Color.FromArgb(85, 98, 120), Text = "Проверка каналов может занять несколько минут. Здесь виден ход работы, а выбранная страна появится в ART VPN после подтверждения подключения." }, 0, 5);
+        // TableLayoutPanel не всегда включает последнюю абсолютную строку
+        // в область прокрутки. Считаем высоту из уже масштабированных строк.
+        _processPage.Layout += (_, _) =>
+        {
+            var height = (int)Math.Ceiling(_processPage.RowStyles.Cast<RowStyle>().Sum(row => row.Height)) + _processPage.Padding.Vertical;
+            if (_processPage.AutoScrollMinSize.Height != height)
+                _processPage.AutoScrollMinSize = new Size(0, height);
+        };
+        pageHost.Controls.Add(content); pageHost.Controls.Add(_processPage);
         var footer = new TableLayoutPanel
         {
-            Dock = DockStyle.Fill, RowCount = 2, ColumnCount = 1,
+            Dock = DockStyle.Fill, RowCount = 3, ColumnCount = 1,
             Margin = Padding.Empty, Padding = new Padding(40, 10, 40, 18)
         };
         footer.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         footer.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        footer.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
         footer.RowStyles.Add(new RowStyle(SizeType.Absolute, 48));
-        layout.Controls.Add(content, 0, 0);
+        layout.Controls.Add(pageHost, 0, 0);
         layout.Controls.Add(footer, 0, 1);
         var title = new Label { Text = "ART VPN", Font = new Font("Segoe UI Semibold", 24), AutoSize = true, Location = new Point(42, 35) };
         var subtitle = new Label
@@ -265,29 +331,69 @@ internal sealed class SetupForm : Form
             Text = "Устойчивый доступ к ChatGPT, OpenAI и Telegram",
             Font = new Font("Segoe UI", 11), ForeColor = Color.FromArgb(85, 98, 120), AutoSize = true, Location = new Point(45, 86)
         };
-        var card = new Panel { BackColor = Color.White, Location = new Point(40, 130), Size = new Size(570, 165), Padding = new Padding(22) };
-        card.Controls.Add(new Label { Text = "Что будет установлено", Font = new Font("Segoe UI Semibold", 12), AutoSize = true, Location = new Point(22, 18) });
-        card.Controls.Add(new Label
+        var quattro = SetupRecommendationCard.Create(openRecommendation);
+        quattro.Location = new Point(40, 128);
+        var card = new Panel { Name = "SetupSubscriptionCard", BackColor = Color.White, Location = new Point(40, 292), Size = new Size(570, 226), Padding = new Padding(22) };
+        card.Controls.Add(new Label { Name = "SetupSubscriptionTitle", Text = "Вставьте ссылку подписки VPN", Font = new Font("Segoe UI Semibold", 12), AutoSize = true, Location = new Point(22, 18) });
+        card.Controls.Add(new Label { Name = "SetupSubscriptionHint", Text = "Скопируйте ссылку из личного кабинета вашего VPN.",
+            AutoSize = true, Font = new Font("Segoe UI", 9), Location = new Point(24, 47), ForeColor = Color.FromArgb(85, 98, 120) });
+        _subscription = new TextBox { Name = "SetupSubscriptionBox", Location = new Point(24, 72), Size = new Size(520, 32),
+            UseSystemPasswordChar = true, MaxLength = 8192, ShortcutsEnabled = true,
+            AccessibleName = "Ссылка подписки VPN", AccessibleDescription = "Вставьте HTTPS-ссылку подписки. Содержимое скрыто для безопасности.", TabIndex = 0 };
+        _later = new CheckBox { Name = "SetupConfigureLater", Text = "Установить без подключения — настрою позже", AutoSize = true,
+            Location = new Point(24, 116), TabIndex = 1 };
+        card.Controls.Add(_subscription); card.Controls.Add(_later);
+        _entryExplanation = new Label
         {
-            Text = "✓ защищённая фоновая служба и автозапуск\n✓ один понятный значок у часов и ярлык на рабочем столе\n✓ автоматическая проверка узлов и безопасный резерв\n✓ без изменения текущего Интернета до вашей команды",
-            AutoSize = true, Location = new Point(24, 57), ForeColor = Color.FromArgb(56, 70, 94)
-        });
-        var quattro = QuattroRecommendation.CreateCard("SetupQuattroRecommendation", 570, openRecommendation);
-        quattro.Location = new Point(40, 309);
-        _status = new Label { Name = "SetupStatus", Text = "Нажмите «Установить». После установки откроется мастер подписки.", AutoSize = false,
+            Name = "SetupConnectionExplanation",
+            Text = "Проверим компьютер, установим VPN и подключим «Авто».\nСсылка шифруется Windows и не попадает в отчёты.",
+            Font = new Font("Segoe UI", 9.5f), AutoSize = true, Location = new Point(24, 158), ForeColor = Color.FromArgb(56, 70, 94)
+        };
+        card.Controls.Add(_entryExplanation);
+        _status = new Label { Name = "SetupStatus", Text = "Всё в один шаг. Диагностика пройдёт автоматически; если потребуется ваше действие, покажем, что нужно исправить.", AutoSize = false,
             Dock = DockStyle.Fill, Margin = new Padding(5, 0, 0, 0),
             ForeColor = Color.FromArgb(85, 98, 120) };
-        _install = new Button { Name = "InstallButton", Text = "Установить", Size = new Size(170, 48), Margin = Padding.Empty,
-            Anchor = AnchorStyles.Right,
-            FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(47, 111, 235), ForeColor = Color.White };
+        var activity = new TableLayoutPanel { Dock = DockStyle.Fill, RowCount = 1, ColumnCount = 2, Margin = Padding.Empty };
+        activity.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        activity.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 168));
+        _progress = new ProgressBar { Name = "SetupProgress", Dock = DockStyle.Fill, Margin = new Padding(5, 7, 12, 9),
+            Style = ProgressBarStyle.Marquee, MarqueeAnimationSpeed = 0, Visible = false,
+            AccessibleName = "Выполняется установка ART VPN" };
+        _elapsed = new Label { Name = "SetupElapsed", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleRight,
+            ForeColor = Color.FromArgb(85, 98, 120), Visible = false };
+        activity.Controls.Add(_progress, 0, 0); activity.Controls.Add(_elapsed, 1, 0);
+        _progressTimer.Tick += (_, _) => _elapsed.Text = "Прошло " + _operationTime.Elapsed.ToString(@"mm\:ss");
+        _install = new Button { Name = "InstallButton", Text = "Установить", Size = new Size(226, 48), Margin = Padding.Empty,
+            Dock = DockStyle.Fill,
+            FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(48, 94, 157), ForeColor = Color.White,
+            Font = new Font("Segoe UI Semibold", 10), Cursor = Cursors.Hand };
         _install.FlatAppearance.BorderSize = 0;
+        _install.FlatAppearance.MouseOverBackColor = Color.FromArgb(40, 80, 137);
+        _later.CheckedChanged += (_, _) => { _subscription.Enabled = !_later.Checked; RefreshEntryAction(); };
+        _subscription.TextChanged += (_, _) => RefreshEntryAction();
         _install.Click += async (_, _) => await InstallAsync();
-        var diagnose = new Button { Name = "InstallationDiagnosticsButton", Text = "Диагностика и восстановление",
-            AutoSize = true, Anchor = AnchorStyles.Left, Height = 40 };
-        diagnose.Click += (_, _) =>
+        _diagnose = new Button { Name = "InstallationDiagnosticsButton", Text = "Диагностика перед установкой",
+            AutoSize = true, Anchor = AnchorStyles.Left, Height = 40, FlatStyle = FlatStyle.Flat,
+            BackColor = Color.White, ForeColor = Color.FromArgb(70, 86, 108), Cursor = Cursors.Hand };
+        _diagnose.FlatAppearance.BorderColor = Color.FromArgb(220, 227, 237);
+        _diagnose.FlatAppearance.MouseOverBackColor = Color.FromArgb(235, 241, 249);
+        _diagnose.Click += (_, _) =>
         {
             using var dialog = new InstallationDiagnosticsForm(_payload, beforeInstall: false);
             dialog.ShowDialog(this);
+        };
+        _back = new Button { Name = "SetupBackButton", Text = "Назад", AutoSize = true, Height = 40,
+            FlatStyle = FlatStyle.Flat, BackColor = Color.White, Visible = false, Margin = new Padding(0, 0, 8, 0) };
+        _back.FlatAppearance.BorderColor = Color.FromArgb(220, 227, 237);
+        _back.Click += (_, _) =>
+        {
+            if (_busy) return;
+            _processPage.Visible = false; _entryPage.Visible = true; _entryPage.BringToFront(); _back.Visible = false;
+            _diagnose.Text = "Диагностика перед установкой";
+            _elapsed.Visible = false; RefreshEntryAction();
+            _status.Text = _installed ? "Программа уже установлена. Можно исправить подписку и повторить только подключение." : "Измените параметры и продолжите установку.";
+            _status.ForeColor = Color.FromArgb(85, 98, 120);
+            if (_subscription.Enabled) _subscription.Focus();
         };
         try
         {
@@ -295,76 +401,194 @@ internal sealed class SetupForm : Form
             var offered = JsonSerializer.Deserialize<PackageManifest>(File.ReadAllText(Path.Combine(payload,"manifest.v1.json")),JsonOptions.Strict);
             if(existing?.OwnerSid == _ownerSid && existing?.Version == offered?.Version)
             {
-                _install.Text = "Открыть ART VPN";
-                _status.Text = "Эта версия уже установлена. Проверим её файлы и откроем программу без переустановки.";
+                _status.Text = "Эта версия уже установлена. Можно подключить подписку или открыть программу без изменения сети.";
+                _later.Checked = true;
             }
         }
         catch (Exception e) when(e is IOException or UnauthorizedAccessException or JsonException) { }
-        content.Controls.AddRange([title, subtitle, card, quattro]);
+        content.Controls.AddRange([title, subtitle, quattro, card]);
         footer.Controls.Add(_status, 0, 0);
-        footer.Controls.Add(_install, 0, 1);
+        footer.Controls.Add(activity, 0, 1);
         var actions = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, Margin = Padding.Empty };
+        actions.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         actions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        actions.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 170));
-        footer.Controls.Remove(_install);
-        actions.Controls.Add(diagnose, 0, 0);
+        actions.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 226));
+        var secondary = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, Margin = Padding.Empty, Padding = new Padding(0, 4, 0, 0) };
+        secondary.Controls.Add(_back); secondary.Controls.Add(_diagnose);
+        actions.Controls.Add(secondary, 0, 0);
         actions.Controls.Add(_install, 1, 0);
-        footer.Controls.Add(actions, 0, 1);
+        footer.Controls.Add(actions, 0, 2);
         Controls.Add(layout);
+        RefreshEntryAction();
+        Shown += (_, _) => { if (_subscription.Enabled) _subscription.Focus(); };
+        FormClosing += (_, e) => { if (_busy) e.Cancel = true; };
+    }
+
+    private bool WillConnect => !_later.Checked && !string.IsNullOrWhiteSpace(_subscription.Text);
+
+    private void RefreshEntryAction()
+    {
+        if (_busy) return;
+        _install.Text = _readyToOpen ? "Открыть ART VPN" : _installed
+            ? (WillConnect ? "Подключить" : "Открыть ART VPN")
+            : "Установить";
+        _entryExplanation.Text = WillConnect
+            ? "Проверим компьютер, установим VPN и подключим «Авто».\nСсылка шифруется Windows и не попадает в отчёты."
+            : "Без подписки установим программу без подключения VPN.\nНастроить подключение можно позже.";
+    }
+
+    private void SetStep(int index, string detail, bool complete = false, bool active = false)
+    {
+        var title = new[] { "Проверка компьютера", "Установка программы", "Подписка и каналы", "Подключение «Авто»" }[index];
+        _steps[index].Text = (complete ? "✓ " : (index + 1) + ". ") + title + "\n" + detail;
+        _steps[index].ForeColor = complete ? Color.FromArgb(25, 111, 77) : active ? Color.FromArgb(48, 94, 157) : Color.FromArgb(85, 98, 120);
+        if (active) _activeStep = index;
     }
 
     private async Task InstallAsync()
     {
-        if (!_install.Enabled) return;
-        _install.Enabled = false;
-        _status.Text = "Проверяем пакет и компьютер…";
+        if (_busy) return;
+        // Ошибка запуска окна после commit не должна повторять установку/подключение.
+        if (_readyToOpen) { OpenCompletedUi(); return; }
+        if (WillConnect && !SetupConnectionText.Valid(_subscription.Text))
+        {
+            _status.Text = "Вставьте HTTPS-ссылку подписки или выберите «настрою позже».";
+            _status.ForeColor = Color.DarkRed; _subscription.Focus(); return;
+        }
+        using var subscription = new System.Security.SecureString();
+        if (WillConnect) foreach (var c in _subscription.Text.Trim()) subscription.AppendChar(c);
+        subscription.MakeReadOnly();
+        var connect = WillConnect;
+        _busy = true;
+        _entryPage.Visible = false; _processPage.Visible = true; _processPage.BringToFront(); _back.Visible = false;
+        _activeStep = 0;
+        _processTitle.Text = _installed && connect ? "Подключаем ART VPN" : "Устанавливаем ART VPN";
+        SetStep(0, _installed ? "Проверено ранее" : "Проверяем файлы, место и настройки…", complete: _installed, active: !_installed);
+        SetStep(1, _installed ? "Уже установлена — повтор не нужен" : "После проверки компьютера", complete: _installed);
+        SetStep(2, connect ? "После установки" : "Пропускаем — без подписки");
+        SetStep(3, connect ? "Ожидаем подтверждённого результата" : "Не подключаем — настроите позже");
+        _operationTime.Restart(); _elapsed.Text = "Прошло 00:00";
+        _progress.Visible = _elapsed.Visible = true;
+        _progress.MarqueeAnimationSpeed = 25; _progressTimer.Start();
+        _install.Enabled = _subscription.Enabled = _later.Enabled = _diagnose.Enabled = false;
+        _diagnose.Visible = false;
+        _install.Text = "Подождите…";
+        _status.Text = "Шаг 1. Проверяем файлы, свободное место и сеть…";
         _status.ForeColor = Color.FromArgb(85, 98, 120);
+        string? failureForDiagnostics = null;
         try
         {
-            using (var diagnostics = new InstallationDiagnosticsForm(_payload, beforeInstall: true))
+            if (!_installed)
             {
-                diagnostics.ShowDialog(this);
-                if (!diagnostics.ContinueRequested) { _install.Enabled = true; return; }
+                if (!await _workflow.DiagnoseAsync(this, _payload, _lifetime.Token))
+                {
+                    SetStep(0, "Проверка не разрешила продолжение"); _processTitle.Text = "Требуется ваше решение";
+                    _status.Text = "Установка не началась. Проверьте замечания диагностики."; return;
+                }
+                SetStep(0, "Проверка завершена", complete: true);
+                SetStep(1, "Устанавливаем файлы и службу…", active: true);
+                _processTitle.Text = "Устанавливаем программу";
+                _status.Text = "Шаг 2. Устанавливаем файлы и службу ART VPN. Если Windows запросит разрешение, подтвердите его…";
+                _installed = await _workflow.InstallAsync(_payload, _ownerSid);
+                if (!_installed) { SetStep(1, "Установка не завершена"); _processTitle.Text = "Установка остановлена"; _status.Text = "Установка не завершена. Сеть не переключалась."; failureForDiagnostics = _status.Text; return; }
             }
-            InstallReceipt? result = null;
-            if (InstallTransaction.IsAdministrator())
+            SetStep(1, "Установка подтверждена", complete: true);
+            Succeeded = true;
+            if (connect)
             {
-                result = await InstallTransaction.InstallAsync(_payload, _ownerSid, CancellationToken.None);
-                Succeeded = result.Status == "Installed";
+                _processTitle.Text = "Проверяем подключение";
+                SetStep(2, "Проверяем подписку и доступные каналы…", active: true);
+                SetStep(3, "Подключение после проверки каналов; ждём результат");
+                _status.Text = "Шаг 3. Проверяем подписку и каналы, подключаем «Авто». Проверка может занять несколько минут…";
+                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
+                timeout.CancelAfter(TimeSpan.FromMinutes(8));
+                var result = await _workflow.ConnectAsync(subscription, timeout.Token);
+                ConnectionCode = result.DetailCode;
+                if (!result.Success)
+                {
+                    SetStep(2, "Проверка и подключение не подтверждены");
+                    SetStep(3, "Нужно проверить результат перед повтором"); _processTitle.Text = "Подключение не подтверждено";
+                    _status.Text = SetupConnectionText.Failure(result.DetailCode);
+                    failureForDiagnostics = _status.Text;
+                    _status.ForeColor = Color.DarkRed; _install.Text = "Повторить"; return;
+                }
+                SetStep(2, "Рабочий канал проверен", complete: true);
+                SetStep(3, "Режим «Авто» подтверждён", complete: true); _processTitle.Text = "ART VPN подключён";
+                _connected = true;
+                _readyToOpen = true;
+                _subscription.Clear();
+                _status.Text = "ART VPN подключён, режим «Авто» включён.";
+                StopProgress();
+                string advisory;
+                try { advisory = await _workflow.CompleteConnectionAsync(); }
+                catch { advisory = "VPN подключён. Если Codex был открыт, сохраните работу и переоткройте его."; }
+                // Вспомогательный диалог не отменяет уже подтверждённое подключение.
+                if (advisory.Length > 0)
+                    try { _workflow.ShowAdvisory(this, advisory); }
+                    catch { _status.Text = "ART VPN подключён. Если Codex был открыт, сохраните работу и переоткройте его вручную."; }
             }
             else
             {
-                _status.Text = "Windows попросит разрешение на установку защищённой службы…";
-                var executable = Environment.ProcessPath ?? throw new InvalidOperationException("InstallerPathUnavailable");
-                using var elevated = Process.Start(new ProcessStartInfo(executable)
-                {
-                    UseShellExecute = true,
-                    Verb = "runas",
-                    Arguments = "--install-owner " + _ownerSid,
-                    WorkingDirectory = AppContext.BaseDirectory
-                }) ?? throw new InvalidOperationException("ElevationStartRejected");
-                await elevated.WaitForExitAsync().ConfigureAwait(true);
-                Succeeded = elevated.ExitCode == 0;
+                _readyToOpen = true;
+                _processTitle.Text = "Программа установлена";
+                _status.Text = "Без подключения VPN. Настроить подписку можно в программе позже.";
+                StopProgress();
             }
-            _status.Text = Succeeded
-                ? "ART VPN готов. Открываем программу; ваши настройки сохранены…"
-                : "Установка остановлена: " + (result?.DetailCode ?? "InstallationRejected");
-            if (Succeeded)
-            {
-                _install.Text = "Готово";
-                var ui = @"C:\Program Files\ART VPN\runtime\ARTVpn.UI.exe";
-                if (File.Exists(ui)) Process.Start(new ProcessStartInfo(ui) { UseShellExecute = true });
-                await Task.Delay(800);
-                Close();
-            }
-            else _install.Enabled = true;
+            OpenCompletedUi();
         }
         catch (Exception ex)
         {
+            SetStep(_activeStep, "Не удалось завершить этап"); _processTitle.Text = "Требуется ваше действие";
             _status.Text = ErrorCode.Describe(ex);
+            failureForDiagnostics = _status.Text;
             _status.ForeColor = Color.DarkRed;
-            _install.Enabled = true;
         }
+        finally
+        {
+            _busy = false;
+            if (!IsDisposed)
+            {
+                StopProgress();
+                _diagnose.Visible = true;
+                _diagnose.Text = "Диагностика";
+                _back.Visible = !_readyToOpen;
+                if (_install.Text == "Подождите…") _install.Text = "Повторить";
+                _install.Enabled = _later.Enabled = _diagnose.Enabled = true; _subscription.Enabled = !_later.Checked;
+                // Один показ на неудачную попытку. Успех и уже показанная
+                // блокирующая preflight-диагностика не открывают второе окно.
+                if (failureForDiagnostics is not null)
+                {
+                    try { _workflow.ShowFailureDiagnostics(this, _payload, failureForDiagnostics); }
+                    catch { _status.Text = failureForDiagnostics + " Нажмите «Диагностика», чтобы повторить проверку."; }
+                }
+            }
+        }
+    }
+
+    private void StopProgress()
+    {
+        _progressTimer.Stop(); _operationTime.Stop(); _progress.MarqueeAnimationSpeed = 0;
+        _progress.Visible = false; _elapsed.Visible = true;
+        _elapsed.Text = "Прошло " + _operationTime.Elapsed.ToString(@"mm\:ss");
+    }
+
+    private void OpenCompletedUi()
+    {
+        try { _workflow.OpenUi(); _busy = false; Close(); }
+        catch
+        {
+            _processTitle.Text = _connected ? "ART VPN подключён" : "Программа установлена";
+            _status.Text = (_connected ? "Подключение сохранено. " : "Установка завершена. ") +
+                "Не удалось открыть окно ART VPN. Нажмите «Открыть ART VPN» для повторной попытки.";
+            _status.ForeColor = Color.FromArgb(136, 90, 20);
+            _install.Text = "Открыть ART VPN";
+        }
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing && !IsDisposed) { _progressTimer.Stop(); _progressTimer.Dispose(); _lifetime.Cancel(); _lifetime.Dispose(); _subscription?.Clear(); }
+        base.Dispose(disposing);
     }
 }
 
@@ -615,6 +839,7 @@ internal static partial class InstallTransaction
 
             phase = "StopOldRuntime";
             StopOwnedUiForUpgrade();
+            UpdateSelectionReceipt.TryCapture(DataRoot, oldState.Version, package.Manifest.Version);
             serviceTouched = true;
             try { RunSc("stop", ServiceName); } catch { }
             await WaitServiceStoppedAsync(cancellationToken).ConfigureAwait(false);
@@ -1080,6 +1305,7 @@ internal static class UninstallTransaction
         RemovalPayloadVerifier.VerifyTree(@"C:\ProgramData\ART VPN Maintenance");
         ValidateServiceOwnership();
         StopOwnedUi();
+        await UninstallRouteReturn.RestoreAsync(DataRoot, state.OwnerSid, cancellationToken).ConfigureAwait(false);
         var leasePath = Path.Combine(DataRoot, "state", "system-proxy-lease.v1.json");
         var proxyRestore = SystemProxyLeaseCoordinator.Restore(
             leasePath, state.OwnerSid, new RegistrySystemProxyStore(state.OwnerSid), dropExternalLease: false,
@@ -1534,6 +1760,7 @@ internal static class ErrorCode
         {
             "AdministratorConsentCancelled" => "Разрешение администратора отменено. Установка не началась. Повторите, когда будете готовы.",
             "AdministratorRequired" => "Для установки фоновой службы нужны права администратора. Обратитесь к администратору компьютера.",
+            "UninstallReturnUnconfirmed" or "UninstallReturnRejected" => "Удаление остановлено: возврат прежнего VPN не подтверждён. Включите HAPP и повторите удаление. ART VPN пока сохранён.",
             "RepairOwnershipRejected" => "Не удалось подтвердить владельца и файлы ART VPN. Автоматическое восстановление остановлено; чужую установку не изменяем.",
             "RepairStartupConflict" => "Запись автозапуска отличается от ART VPN. Не перезаписываем чужую команду; требуется проверка администратора.",
             "RepairServiceBusy" => "Служба сейчас запускается или останавливается. Дождитесь завершения и повторите проверку.",
