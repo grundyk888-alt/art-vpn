@@ -8,6 +8,7 @@ internal sealed class MainForm : Form
     private readonly IArtVpnUiController _controller;
     private readonly ISetupLauncher _setupLauncher;
     private readonly Action<string>? _openRecommendation;
+    private readonly Action<IWin32Window, string> _showCodexRestartAdvice;
 
     private readonly NotifyIcon _tray;
     private readonly System.Windows.Forms.Timer _ageTimer;
@@ -35,9 +36,9 @@ internal sealed class MainForm : Form
     private Button _updateButton = null!;
     private string _notifiedUpdate = "";
 
-    private Label _codexRoute = null!;
     private Label _windowsRoute = null!;
     private readonly Label _footer;
+    private readonly ToolTip _details = new() { AutoPopDelay = 15000, InitialDelay = 400, ReshowDelay = 100, ShowAlways = true };
     private readonly Label[] _nodeRole = new Label[3];
     private readonly Label[] _nodeCountry = new Label[3];
     private readonly Label[] _nodeDetail = new Label[3];
@@ -51,11 +52,15 @@ internal sealed class MainForm : Form
     private DiagnosticsDialog? _diagnosticsDialog;
     private HelpDialog? _helpDialog;
 
-    public MainForm(IArtVpnUiController controller, ISetupLauncher setupLauncher, Action<string>? openRecommendation = null)
+    public MainForm(IArtVpnUiController controller, ISetupLauncher setupLauncher, Action<string>? openRecommendation = null,
+        Action<IWin32Window, string>? showCodexRestartAdvice = null)
     {
         _controller = controller ?? throw new ArgumentNullException(nameof(controller));
         _setupLauncher = setupLauncher ?? throw new ArgumentNullException(nameof(setupLauncher));
         _openRecommendation = openRecommendation;
+        _showCodexRestartAdvice = showCodexRestartAdvice ?? ((owner, message) =>
+            MessageBox.Show(owner, message, "Перезапустите Codex после смены VPN",
+                MessageBoxButtons.OK, MessageBoxIcon.Information));
 
         Text = "ART VPN для ChatGPT, YouTube и других сервисов";
         Name = "ARTVpnMainForm";
@@ -101,9 +106,8 @@ internal sealed class MainForm : Form
         scroll.Controls.Add(_hero);
         scroll.Controls.Add(BuildWindowsConnectionCard());
         scroll.Controls.Add(BuildConnectionCard());
-        scroll.Controls.Add(QuattroRecommendation.CreateCard("MainQuattroRecommendation", 920, _openRecommendation));
+        scroll.Controls.Add(QuattroRecommendation.CreateCard("MainQuattroRecommendation", 920, _openRecommendation, prominent: true));
         scroll.Controls.Add(BuildAutomationCard());
-        scroll.Controls.Add(BuildCodexRouteCard());
         ResizeCards(scroll);
         scroll.ClientSizeChanged += (_, _) => ResizeCards(scroll);
 
@@ -128,7 +132,7 @@ internal sealed class MainForm : Form
         {
             var item = new ToolStripMenuItem(caption) { Name = "TrayMode" + mode, CheckOnClick = false };
             item.Click += async (_, _) => await ExecuteAsync(token => _controller.SetModeAsync(mode, token),
-                refreshAfter: true, TimeSpan.FromSeconds(60));
+                refreshAfter: true, TimeSpan.FromMinutes(3));
             _trayModeButtons.Add(mode, item);
             trayMenu.Items.Add(item);
         }
@@ -172,11 +176,15 @@ internal sealed class MainForm : Form
     internal bool IsBusy => _busy;
     internal NotifyIcon Tray => _tray;
 
-    internal async void ShowSetupCompletion(string message)
+    internal async void ShowSetupCompletion(string message, bool codexRestartSuggested = false)
     {
         if (IsDisposed) return;
         await RefreshStatusAsync();
-        if (!IsDisposed) _footer.Text = message;
+        if (!IsDisposed)
+        {
+            _footer.Text = message;
+            if (codexRestartSuggested) ShowCodexRestartAdvice();
+        }
     }
 
     private Control BuildHeader()
@@ -187,7 +195,11 @@ internal sealed class MainForm : Form
         var subtitle = UiFactory.Label("Стабильный доступ к ChatGPT и OpenAI", 9.5f, false, Palette.Muted);
         subtitle.Location = new Point(30, 47);
         var quattro = ProductLinks.QuattroLink("QuattroReferralLink",
-            "Рекомендуем Quattro VPN — большой выбор стран", new Point(315, 48), _openRecommendation);
+            "Рекомендуем Quattro VPN", new Point(315, 37), _openRecommendation);
+        quattro.BackColor = Color.FromArgb(233, 240, 255);
+        quattro.Padding = new Padding(10, 7, 10, 7);
+        quattro.LinkBehavior = LinkBehavior.HoverUnderline;
+        quattro.LinkColor = Color.FromArgb(37, 76, 133);
         header.Controls.Add(brand);
         header.Controls.Add(subtitle);
         header.Controls.Add(quattro);
@@ -196,7 +208,7 @@ internal sealed class MainForm : Form
         setup.Anchor = AnchorStyles.Top | AnchorStyles.Right;
         setup.Location = new Point(Width - 180, 16);
         setup.Click += (_, _) => _setupLauncher.Open(this, _controller);
-        var help = UiFactory.Button("HelpButton", "❔ Как пользоваться", false, 174);
+        var help = UiFactory.Button("HelpButton", "Как пользоваться", false, 174);
         help.Anchor = AnchorStyles.Top | AnchorStyles.Right;
         help.Location = new Point(setup.Left - help.Width - 12, 16);
         help.Click += (_, _) => OpenHelp();
@@ -208,9 +220,12 @@ internal sealed class MainForm : Form
         {
             setup.Left = header.ClientSize.Width - setup.Width - 28;
             help.Left = setup.Left - help.Width - 12;
-            quattro.Text = header.ClientSize.Width >= 1000
-                ? "Рекомендуем Quattro VPN — большой выбор стран"
-                : "Рекомендуем Quattro VPN";
+            quattro.Text = "Рекомендуем Quattro VPN";
+            // On narrow windows use the free centre of the first row; do not
+            // let the larger recommendation pill collide with Help/subtitle.
+            var narrow = 315 * DeviceDpi / 96 + quattro.Width + 12 > help.Left;
+            quattro.Location = narrow ? new Point(Math.Max(brand.Right + 16, help.Left - quattro.Width - 12), 4)
+                : new Point(315 * DeviceDpi / 96, 37 * DeviceDpi / 96);
         };
         return header;
     }
@@ -250,6 +265,7 @@ internal sealed class MainForm : Form
         _explanation.Size = new Size(590, 34);
         _mode = CreatePill("Авто", new Point(104, 98), Palette.BlueSoft, Palette.Blue);
         _quality = CreatePill("Не проверено", new Point(210, 98), Color.White, Palette.Muted);
+        _quality.Visible = false; // Repeated quality text belongs in the status tooltip.
         _mode.Width = 140;
         _quality.Left = 254;
         _activeChannel = UiFactory.Label("Сейчас: канал не подтверждён", 10, true, Palette.Muted);
@@ -279,11 +295,11 @@ internal sealed class MainForm : Form
                         TextFormatFlags.WordBreak | TextFormatFlags.TextBoxControl).Height + Px(2), Px(minimum), Px(maximum));
                 _headline.Height = TextHeight(_headline, 30, 90);
                 _explanation.Top = _headline.Bottom + Px(6);
-                _explanation.Height = TextHeight(_explanation, 34, 180);
+                _explanation.Height = TextHeight(_explanation, 20, 180);
                 _mode.Top = _quality.Top = _explanation.Bottom + Px(5);
                 _activeChannel.Top = Math.Max(_mode.Bottom, _quality.Bottom) + Px(7);
                 _activeChannel.Width = Math.Max(Px(100), card.ClientSize.Width - _activeChannel.Left - Px(24));
-                card.Height = Math.Max(Px(170), _activeChannel.Bottom + Px(14));
+                card.Height = Math.Max(Px(148), _activeChannel.Bottom + Px(14));
             }
             finally { layingOut = false; }
         }
@@ -373,6 +389,39 @@ internal sealed class MainForm : Form
             node.Controls.Add(_nodeDetail[index]);
             card.Controls.Add(node);
         }
+        void LayoutConnection()
+        {
+            int Px(int value) => (int)Math.Round(value * card.DeviceDpi / 96.0);
+            var inner = card.ClientSize.Width - Px(48);
+            var countryWidth = Math.Clamp(inner / 3, Px(220), Px(300));
+            _country.Width = _connectedAge.Width = countryWidth - Px(16);
+            var metrics = new[] { _latency, _stability, _lastSwitch };
+            var metricWidth = Math.Max(Px(100), (inner - countryWidth) / metrics.Length);
+            for (var i = 0; i < metrics.Length; i++)
+            {
+                var value = metrics[i];
+                value.Left = Px(24) + countryWidth + i * metricWidth;
+                value.Width = metricWidth - Px(10);
+                if (value.Tag is Label caption)
+                {
+                    caption.Left = value.Left; caption.AutoSize = false; caption.AutoEllipsis = true;
+                    caption.Size = new Size(value.Width, Px(22));
+                }
+            }
+            var nodes = card.Controls.OfType<RoundedPanel>().OrderBy(node => node.Name).ToArray();
+            var nodeWidth = (inner - Px(24)) / 3;
+            for (var i = 0; i < nodes.Length; i++)
+            {
+                nodes[i].Left = Px(24) + i * (nodeWidth + Px(12));
+                nodes[i].Top = Px(_switchReason.Visible ? 171 : 137);
+                nodes[i].Width = nodeWidth;
+                foreach (Control label in nodes[i].Controls) label.Width = nodeWidth - Px(28);
+            }
+            if (nodes.Length > 0) card.Height = nodes.Max(node => node.Bottom) + Px(24);
+        }
+        card.Resize += (_, _) => LayoutConnection();
+        _switchReason.VisibleChanged += (_, _) => LayoutConnection();
+        LayoutConnection();
         return card;
     }
 
@@ -382,11 +431,11 @@ internal sealed class MainForm : Form
         {
             Name = "WindowsConnectionCard",
             Width = 920,
-            Height = 200,
+            Height = 164,
             Margin = new Padding(0, 0, 0, 16),
             BackColor = Color.White
         };
-        var title = UiFactory.Label("Подключение Windows", 13, true);
+        var title = UiFactory.Label("Режим VPN", 13, true);
         title.Location = new Point(24, 18);
         var description = UiFactory.Label(
             "Подключение Windows ещё не проверено.",
@@ -395,7 +444,7 @@ internal sealed class MainForm : Form
         description.Name = "WindowsRouteStatus";
         description.Location = new Point(26, 50);
         description.MaximumSize = new Size(card.Width - 52, 42);
-        var modes = new FlowLayoutPanel { Location = new Point(20, 96), Size = new Size(610, 46), WrapContents = false };
+        var modes = new FlowLayoutPanel { Location = new Point(20, 80), Size = new Size(610, 46), WrapContents = false };
         foreach (var (mode, name, caption) in new[]
         {
             ("Auto", "AutoModeButton", "Авто"),
@@ -405,28 +454,30 @@ internal sealed class MainForm : Form
         })
         {
             var button = UiFactory.Button(name, caption, false, mode == "Auto" ? 90 : 112);
-            button.AccessibleDescription = mode == "Auto" ? "Автоматический выбор ART VPN и проверенного резерва"
+            button.AccessibleDescription = mode == "Auto" ? "Основной канал ART VPN; проверенный внешний резерв используется при сбое"
                 : mode == "ArtVpn" ? "Встроенный канал ART VPN; внешний клиент не выбирается автоматически"
                 : $"Проверить {ExternalProxyEndpoint.ForMode(mode)!.DisplayName} (HTTP {ExternalProxyEndpoint.ForMode(mode)!.Port}) и выбрать вручную; не возвращаться на ART VPN без вашего действия";
             button.Click += async (_, _) => await ExecuteAsync(token => _controller.SetModeAsync(mode, token),
-                refreshAfter: true, TimeSpan.FromSeconds(60));
+                refreshAfter: true, TimeSpan.FromMinutes(3));
             _modeButtons.Add(mode, button);
             _actionButtons.Add(button);
             modes.Controls.Add(button);
         }
         var restore = UiFactory.Button("RestoreProxyButton", "Вернуть прежнее", false, 178);
+        restore.AccessibleDescription = "Вернуть прежнее подключение. Если до ART работал поддерживаемый HAPP, включить его и проверить связь.";
         restore.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-        restore.Location = new Point(card.Width - 202, 96);
+        restore.Location = new Point(card.Width - 202, 80);
         restore.Click += async (_, _) => await ExecuteAsync(
-            token => _controller.RestoreSystemProxyAsync(token), refreshAfter: true);
+            token => _controller.RestoreSystemProxyAsync(token), refreshAfter: true, TimeSpan.FromMinutes(3));
         card.Resize += (_, _) =>
         {
             restore.Left = card.ClientSize.Width - restore.Width - 24;
             description.MaximumSize = new Size(card.ClientSize.Width - 52, 42);
             modes.Width = restore.Left - modes.Left - 12;
         };
-        var hint = UiFactory.Label("Сначала проверка, затем переключение. «Авто» запоминает последний успешно выбранный внешний резерв. Если он не готов, текущая сеть сохраняется.", 9, false, Palette.Muted);
-        hint.Location = new Point(26, 157);
+        var hint = UiFactory.Label("Авто — основной ART VPN, внешний VPN — резерв.", 9, false, Palette.Muted);
+        hint.Name = "WindowsModeHint";
+        hint.Location = new Point(26, 138);
         hint.MaximumSize = new Size(690, 36);
         _actionButtons.Add(restore);
         card.Controls.Add(title);
@@ -466,7 +517,8 @@ internal sealed class MainForm : Form
         updates.Click += async (_, _) =>
         {
             UiOperationResult? result = null;
-            await ExecuteAsync(async token => result = await _controller.CheckUpdatesAsync(token), refreshAfter: true);
+            await ExecuteAsync(async token => result = await _controller.CheckUpdatesAsync(token), refreshAfter: true,
+                operationTimeout: TimeSpan.FromSeconds(40));
             if (result?.Success == true && result.IncidentCode == "SignedUpdateAvailable")
                 UpdateDownloadLink.Offer(this);
         };
@@ -486,36 +538,6 @@ internal sealed class MainForm : Form
         card.Controls.Add(updates);
         card.Controls.Add(refresh);
         card.Controls.Add(diagnostics);
-        return card;
-    }
-
-    private RoundedPanel BuildCodexRouteCard()
-    {
-        var card = new RoundedPanel
-        {
-            Name = "CodexRouteCard", Width = 920, Height = 174,
-            Margin = new Padding(0, 0, 0, 16), BackColor = Palette.BlueSoft,
-            BorderColor = Color.FromArgb(197, 216, 250)
-        };
-        var title = UiFactory.Label("Подключение Codex и ChatGPT", 13, true);
-        title.Location = new Point(24, 20);
-        var description = UiFactory.Label(
-            "Обновляйте Codex и ChatGPT в самом приложении. ART VPN не закрывает и не обновляет их; фоновая служба VPN работает независимо от этих окон.",
-            9.5f, false, Palette.Muted);
-        description.Location = new Point(24, 52);
-        description.Size = new Size(card.Width - 48, 42);
-        description.AutoSize = false;
-        _codexRoute = UiFactory.Label("Подхват Codex после запуска: проверяем настройки…", 9.5f, true, Palette.Blue);
-        _codexRoute.Name = "CodexRouteStatus";
-        _codexRoute.Location = new Point(24, 102);
-        _codexRoute.Size = new Size(card.Width - 48, 46);
-        _codexRoute.AutoSize = false;
-        card.Resize += (_, _) =>
-        {
-            description.Width = Math.Max(100, card.ClientSize.Width - 48);
-            _codexRoute.Width = description.Width;
-        };
-        card.Controls.AddRange([title, description, _codexRoute]);
         return card;
     }
 
@@ -550,6 +572,7 @@ internal sealed class MainForm : Form
         var key = UiFactory.Label(caption, 8.5f, false, Palette.Muted);
         key.Location = new Point(left, 54);
         var label = UiFactory.Label(value, 11, true);
+        label.Tag = key;
         label.Location = new Point(left, 78);
         // Long telemetry/date text must not overlap the neighbouring metric.
         label.AutoSize = false;
@@ -568,6 +591,10 @@ internal sealed class MainForm : Form
         key.Location = new Point(48, top);
         var label = UiFactory.Label(value, 9.3f, false, Palette.Muted);
         label.Location = new Point(250, top);
+        label.AutoSize = false;
+        label.AutoEllipsis = true;
+        label.Size = new Size(Math.Max(100, parent.ClientSize.Width - label.Left - 24), 22);
+        parent.Resize += (_, _) => label.Width = Math.Max(100, parent.ClientSize.Width - label.Left - 24);
         parent.Controls.Add(dot);
         parent.Controls.Add(key);
         parent.Controls.Add(label);
@@ -595,9 +622,19 @@ internal sealed class MainForm : Form
 
     private static void ResizeCards(FlowLayoutPanel scroll)
     {
-        var width = Math.Max(760, scroll.ClientSize.Width - scroll.Padding.Horizontal -
-            (scroll.VerticalScroll.Visible ? SystemInformation.VerticalScrollBarWidth : 0) - 4);
-        foreach (Control card in scroll.Controls) card.Width = width;
+        if (scroll.Tag is true) return;
+        scroll.Tag = true;
+        try
+        {
+            // ClientSize already excludes the scrollbar. Batch widths so the
+            // top-down flow does not retain a column from the previous size.
+            var width = Math.Max(720, scroll.ClientSize.Width - scroll.Padding.Horizontal - 4);
+            scroll.SuspendLayout();
+            try { foreach (Control card in scroll.Controls) card.Width = width; }
+            finally { scroll.ResumeLayout(performLayout: true); }
+            scroll.PerformLayout();
+        }
+        finally { scroll.Tag = null; }
     }
 
     private async Task ExecuteAsync(
@@ -618,6 +655,7 @@ internal sealed class MainForm : Form
             _footer.Text = result.Success ? "Готово: " + result.Message : "Требуется внимание: " + result.Message;
             _footer.ForeColor = result.Success ? Palette.Green : Palette.Amber;
             if (!result.Success) _operationError = _footer.Text;
+            if (result.Success && result.CodexRestartSuggested) ShowCodexRestartAdvice();
         }
         catch (Exception)
         {
@@ -631,6 +669,16 @@ internal sealed class MainForm : Form
         finally { SetBusy(false, _footer.Text); }
     }
 
+    private void ShowCodexRestartAdvice()
+    {
+        if (IsDisposed) return;
+        // A deliberate user command may originate in the tray. Bring this
+        // one-off notice into view; status polls must never reopen it.
+        if (!Visible || WindowState == FormWindowState.Minimized) RestoreFromTray();
+        try { _showCodexRestartAdvice(this, RouteChangeAdvisory.RestartMessage); }
+        catch { /* An advisory failure must not relabel a committed VPN switch. */ }
+    }
+
     internal async Task RefreshStatusAsync(bool setBusy = true)
     {
         if (_busy && setBusy) return;
@@ -641,7 +689,7 @@ internal sealed class MainForm : Form
             var state = await _controller.GetStatusAsync(timeout.Token);
             Render(state);
             _footer.Text = state.ServiceAvailable
-                ? "Служба работает независимо от окна. Закрытие интерфейса VPN не выключает."
+                ? "VPN продолжает работать при закрытии окна."
                 : "Служба пока недоступна. Нажмите «Настроить» — текущая сеть не изменится.";
             _footer.ForeColor = state.ServiceAvailable ? Palette.Green : Palette.Amber;
         }
@@ -686,13 +734,15 @@ internal sealed class MainForm : Form
             button.FlatAppearance.BorderColor = selected ? Palette.Blue : Palette.Border;
         }
         foreach (var (mode, item) in _trayModeButtons) item.Checked = mode == state.ConfirmedRouteMode;
-        _windowsRoute.Text = state.WindowsRouteStatus;
-        _codexRoute.Text = string.IsNullOrWhiteSpace(state.CodexRouteStatus)
-            ? "Подхват Codex: состояние ещё не подтверждено." : state.CodexRouteStatus;
+        _details.SetToolTip(_windowsRoute, state.WindowsRouteStatus);
+        _windowsRoute.Text = state.WindowsUsesArtVpn == true
+            ? "Windows: ART VPN · 127.0.0.1:22080" : state.WindowsRouteStatus;
         var previousHealth = _lastHealth;
         _lastHealth = state.Health;
         _headline.Text = state.Headline;
-        _explanation.Text = state.Explanation;
+        _details.SetToolTip(_headline, state.Explanation + "\n" + state.Quality);
+        _explanation.Text = state.Health == VpnHealth.Healthy && state.ActiveChannelVerified && state.WindowsUsesArtVpn == true
+            ? "Соединение проверено." : state.Explanation;
         _country.Text = state.Country;
         _selectedAt = state.SelectedAt;
         // An external client does not publish its node-selection timestamp.
@@ -705,6 +755,8 @@ internal sealed class MainForm : Form
         _stability.Text = state.Stability;
         _lastSwitch.Text = state.LastSwitch;
         _switchReason.Text = "Причина смены: " + state.LastSwitchReason;
+        _switchReason.Visible = state.Health != VpnHealth.Healthy;
+        _details.SetToolTip(_country, "Причина смены: " + state.LastSwitchReason);
         _subscription.Text = state.Subscription;
         _subscriptionAt.Text = state.SubscriptionAt;
         _bypass.Text = state.Bypass;
@@ -757,7 +809,8 @@ internal sealed class MainForm : Form
         }
         var age = DateTimeOffset.Now - _selectedAt.Value.ToLocalTime();
         if (age < TimeSpan.Zero) age = TimeSpan.Zero;
-        _connectedAge.Text = $"канал установлен {_selectedAt.Value.ToLocalTime():dd.MM.yyyy HH:mm} • без смены {FormatAge(age)}";
+        _connectedAge.Text = $"Без смены {FormatAge(age)}";
+        _details.SetToolTip(_connectedAge, $"Канал подключён {_selectedAt.Value.ToLocalTime():dd.MM.yyyy HH:mm}");
     }
 
     private static string FormatAge(TimeSpan age) => age.TotalDays >= 1
@@ -803,6 +856,7 @@ internal sealed class MainForm : Form
         {
             _ageTimer.Dispose();
             _statusTimer.Dispose();
+            _details.Dispose();
             _tray.Visible = false;
             _tray.Dispose();
             Icon?.Dispose();

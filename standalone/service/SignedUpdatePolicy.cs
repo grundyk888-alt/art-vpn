@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using JsonSettings = ArtSport.ArtVpn.Common.UpdateJson;
 
 namespace ArtSport.ArtVpn.Service;
 

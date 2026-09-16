@@ -23,6 +23,7 @@ internal static class RouteModeControlTests
         RuntimeOptions Options(string name) => RuntimeOptions.Test(Path.Combine(root, name), "RouteModeTest." + name);
         try
         {
+            await HappHandoverTests.RunAsync(Options, Check);
             var tunnelStore = new MemorySystemProxyStore(before);
             var tunnelRoute = new RouteModeControl(Options("tun-guard"), Owner, tunnelStore, Probe,
                 externalTunnel: () => "ExternalTunnelOwnsRoute");

@@ -1,0 +1,422 @@
+[
+  {
+    "sha256": "E3EEA05CF2DD3C859CE32AC2C6CF02C92C0419A108F4A366609BCD8DD653F53F",
+    "path": "standalone/common/AcceptedClientRelease.cs"
+  },
+  {
+    "sha256": "3427005885D165F7C4A83766959433A1044B87FF13790F4D1D1910F9FE0765B0",
+    "path": "standalone/common/ConnectionProblemText.cs"
+  },
+  {
+    "sha256": "B30BD36C1DC6C00ADA71D99EDF531DD81F77ACAB5E2038EF68A7DF0A4181C32A",
+    "path": "standalone/common/ExternalProxyEndpoint.cs"
+  },
+  {
+    "sha256": "A7B912E5265FD5C7D2EE8C8FC3A752BAEF9F9B6256FF79D8D89FB80CF14A96DC",
+    "path": "standalone/common/ProviderConnectionClient.cs"
+  },
+  {
+    "sha256": "0B6B0A6B5644169E7518BA53A32A8338F28A3CEB57C480EE9BE46A2A8A223839",
+    "path": "standalone/common/QuattroRecommendation.cs"
+  },
+  {
+    "sha256": "76482AE2E8130C9267210B0CD9CE8F0E559D8D20C47361823728C6AFEB4977C4",
+    "path": "standalone/common/SystemProxyLease.cs"
+  },
+  {
+    "sha256": "07373F5275E7FAF04EC2EA20E0BB9F837790D227EBED3A578FE0CEC72F1E21E6",
+    "path": "standalone/common/UpdateJson.cs"
+  },
+  {
+    "sha256": "D83B8F44F7B7C3FC426B38D8599B0E6343C6B729368FC790F012BD0EC95EE641",
+    "path": "standalone/service/ARTVpn.Service.csproj"
+  },
+  {
+    "sha256": "16B6D690D2E20FF2DF82A1733E091540387C2B4E9E636B6FACD8B478495B8500",
+    "path": "standalone/service/BoundedHttpContent.cs"
+  },
+  {
+    "sha256": "93BECCC3B55C085267842963371DECA15B82CB571D8970810FF96336A10565CB",
+    "path": "standalone/service/BypassRefreshTests.cs"
+  },
+  {
+    "sha256": "0C6DAEC6BB37DB47735D0CA603E926DA141955626B3A433131EE2EC83F1DC643",
+    "path": "standalone/service/BypassRuleRefresh.cs"
+  },
+  {
+    "sha256": "586B2A69ABC54A4E57D692A00ACA3815442CCE177BC928D568AB5207818A49EB",
+    "path": "standalone/service/ClientAcquisition.cs"
+  },
+  {
+    "sha256": "667B4CB3360884EDE4F15B46590B72B616943CBE4891B3172300C8B2BA3F02E9",
+    "path": "standalone/service/ClientDirectorySecurity.cs"
+  },
+  {
+    "sha256": "5B2FDB018796638A618F9EA0D4A002A08D03514787847C604A56D0BD41CC0DE1",
+    "path": "standalone/service/ConnectionDiagnosis.cs"
+  },
+  {
+    "sha256": "1E2918ECA00FE03077FF6815B16FBDB138AB7DBA786D33647529E9441F20EFBE",
+    "path": "standalone/service/ConnectionDiagnosisControllerTests.cs"
+  },
+  {
+    "sha256": "8BD049D55A55FE6DC953DB9DE937F3850CE723003E321D4920009F393D5448A4",
+    "path": "standalone/service/ContinuityPolicy.cs"
+  },
+  {
+    "sha256": "66E2DC96D2A7192917C6272FF37D8E74FE2548A8FBD520211E1791F8A99F844D",
+    "path": "standalone/service/CoreRuntimeEngine.cs"
+  },
+  {
+    "sha256": "920280DDC8C2BD88D9CDD021A4E0385F691B220F5D9A0C41CB37FE3B297F67ED",
+    "path": "standalone/service/ExternalReserveTests.cs"
+  },
+  {
+    "sha256": "F5ACCDFF02E2E102C568E1D187628EAAF89EE52A635B07C254B557C9495173EB",
+    "path": "standalone/service/ExternalTunnelDiagnosis.cs"
+  },
+  {
+    "sha256": "CA1721D63A6224C74612CF72E4FE678E6D4B380A67B0681EA1EDCF304C80CD67",
+    "path": "standalone/service/FirstConnectionQualification.cs"
+  },
+  {
+    "sha256": "072D176BCC814D2C4758AA148BF66A783D974B2C6F6BE4AFA92022E1DF478906",
+    "path": "standalone/service/FirstConnectionTests.cs"
+  },
+  {
+    "sha256": "8112DD08220847E1E16E6BAA32FF72D0069B9C069F9B6910A990AC4B8D79D7A8",
+    "path": "standalone/service/GoogleReachability.cs"
+  },
+  {
+    "sha256": "8953FA99C48238A4FF75C63FE9FEC28CE7892C8D59488E593EBFE176573A5BC3",
+    "path": "standalone/service/HappHandoverTests.cs"
+  },
+  {
+    "sha256": "E8EB616EFC519577B283547A62D729B7989925FAE27E087D472A461FB614326C",
+    "path": "standalone/service/HappRouteHandover.cs"
+  },
+  {
+    "sha256": "B11D09A6113BA4FEF684B8AEA0A316B4491BA88FB5DBAFE265ACFD0A2C1CFF72",
+    "path": "standalone/service/HappSessionCommand.cs"
+  },
+  {
+    "sha256": "36BED2FACBAC58E148BA81711E76CE1A83E5781B00E1BDFDC25D0F4F28E78BA4",
+    "path": "standalone/service/LiveSelectorStatus.cs"
+  },
+  {
+    "sha256": "D8E1CBE270AE2E69D2F1F7EDCB9496CBB8606A5A339308926CECDD1A86C33E7A",
+    "path": "standalone/service/MachineIdentity.cs"
+  },
+  {
+    "sha256": "8E1C771F758A8D1E2D8E5D3DB16F961DD3AF37104293748EFAB6FB7F6F3E66F3",
+    "path": "standalone/service/NodeCountryDisplay.cs"
+  },
+  {
+    "sha256": "CC10CF9B80E19DB8E673845C10A4BF915C20369DBA03C27BE533F8563972C0FB",
+    "path": "standalone/service/NodeQualification.cs"
+  },
+  {
+    "sha256": "CB371D4306FB8287970D8FB40C9026380239707EE9C011770339369ABFA57EF6",
+    "path": "standalone/service/OwnerSessionAvailability.cs"
+  },
+  {
+    "sha256": "645B54DF3C22C2C8B57C9D4AD87E50B04F5E77ADE06AC9B6687CDA39C24EAC71",
+    "path": "standalone/service/OwnerSessionStartupTests.cs"
+  },
+  {
+    "sha256": "69ED2E7A29032221429694CC2EE6CB11343E871873FBD23131B4EA25A3D5D40D",
+    "path": "standalone/service/ProductUpdateChecker.cs"
+  },
+  {
+    "sha256": "F487B02A6D9C7DA70EF40B18D9AA3470E9D462689A4AED105579ADF695C50FEA",
+    "path": "standalone/service/Program.cs"
+  },
+  {
+    "sha256": "E6C342A849401B6A028C23E10D0B9046986BB1D50637E227294C21D795A9BE7B",
+    "path": "standalone/service/ProgressiveFirstConnectionTests.cs"
+  },
+  {
+    "sha256": "E54101AA0DAC50F7FD7E8F93FAD407E93F5B8D9D541B4C2B6A780E1041203CCF",
+    "path": "standalone/service/ProviderAdapter.cs"
+  },
+  {
+    "sha256": "EB518CC67D24908EE056D0839D1CBEFEE59BE3FDF3660F3F42E1F1C319280173",
+    "path": "standalone/service/ProviderProvisioning.cs"
+  },
+  {
+    "sha256": "7E2635D0A97582C7CD09E39489FDB3A14A23F990704AA50E63B5CF5D14E8A2FD",
+    "path": "standalone/service/ProviderReplacementTests.cs"
+  },
+  {
+    "sha256": "1C7D7E8CE6E120CF969F473770CFC3E47B416F1A6467BEEEB1A77B2ECAA90EDA",
+    "path": "standalone/service/QualificationPolicy.cs"
+  },
+  {
+    "sha256": "E2D7313621129680432AC17C98E334199CC8CA9A8ADA8AEF204E363335EDA5CA",
+    "path": "standalone/service/ReleaseContinuityTests.cs"
+  },
+  {
+    "sha256": "07E9E1EEC37C7FD4EAF1E8C89DF85CCC8888D5A5DE2F8DC7BAE2BADC1FC488B5",
+    "path": "standalone/service/ResourceBudgetTests.cs"
+  },
+  {
+    "sha256": "47E77277C75A37C4D70D3E4830B0997517BFCD0EB1FC6F3109D0C15FC253F5F0",
+    "path": "standalone/service/RouteModeControl.cs"
+  },
+  {
+    "sha256": "4633B9D241B11BFDE67D5BF0FF3118CC933DD3E2EBC303FDE57519A951A8D7D0",
+    "path": "standalone/service/RouteModeControlTests.cs"
+  },
+  {
+    "sha256": "B5B7F95EF5AE7A39B3758DC87E07B14666BF020E107ED027EAD8113AD86A01DE",
+    "path": "standalone/service/RouteStatusPresentation.cs"
+  },
+  {
+    "sha256": "C5E2066092F3C437BDD7AAAE3967E9027B62B7B23E034326EF05C64DC5CD45ED",
+    "path": "standalone/service/RuntimeAssets.cs"
+  },
+  {
+    "sha256": "B1DBAE69633884CBECA728EA37F9C2624DE166BA961AA50D72DE3B72F10A7116",
+    "path": "standalone/service/RuntimeController.cs"
+  },
+  {
+    "sha256": "0E8FAEB4FFF6E26CAEB40AF407F2F94226B937C4A52B396323DD448F9B7B5F7E",
+    "path": "standalone/service/RuntimeLifetime.cs"
+  },
+  {
+    "sha256": "28FF465632C0F125640084BF299ADA18DE909F11F0273B9F09F4E3918063B668",
+    "path": "standalone/service/SelectedRouteProbe.cs"
+  },
+  {
+    "sha256": "885C2B56F0CB786B7BF7C27899EB69A919CEECCFFC065B440CC1B8849EEA751A",
+    "path": "standalone/service/SelectedRouteProbeTests.cs"
+  },
+  {
+    "sha256": "702D11CEC990770AFD36EE2B6799CBAE8A376797A6F56DBA986972B3E136D120",
+    "path": "standalone/service/ShutdownLifetimeTests.cs"
+  },
+  {
+    "sha256": "B38DB098EF8340587EACD9A4B39546ED6520F3B8792ABF16EBD1127C1EADCFFD",
+    "path": "standalone/service/SignedUpdatePolicy.cs"
+  },
+  {
+    "sha256": "FEFA1BC49B701A2AB8185F4EAD10DEB1731C8914E959874E429CA2D05D94BAB1",
+    "path": "standalone/service/SlotRuntimeManager.cs"
+  },
+  {
+    "sha256": "C59B9258D649027BF9D300BF628D64143AF37FEC7E29576DA751CCF88878793F",
+    "path": "standalone/service/StableFront.cs"
+  },
+  {
+    "sha256": "5ADFD0F03CED963B91B2DF7C9E7FC048BBFEA3EB018A400BDFEDAF3F6DB49DB1",
+    "path": "standalone/service/SupportDiagnostics.cs"
+  },
+  {
+    "sha256": "ED661C1A1FE68973713D7936A5ED15B45E83BD0EAF1764ACEFE91CC5C1665D90",
+    "path": "standalone/service/WatchdogContinuityGate.cs"
+  },
+  {
+    "sha256": "DE28B95FA90AB10FF82B9FFB96DBF5F71489CA92E91D03B53C6C88DA9D16E094",
+    "path": "standalone/ui/ARTVpn.UI.csproj"
+  },
+  {
+    "sha256": "A172AC489396DCECB50B9719F99E2AC2E3FB87A313E8E938B240CA3143DAA127",
+    "path": "standalone/ui/ChatGptUpdateHelper.cs"
+  },
+  {
+    "sha256": "2DC106BE1DE3205B922E18C6F61AB83174031E36F590A7E15AFA719A7BDAE0CF",
+    "path": "standalone/ui/ClientAcquisitionUiTests.cs"
+  },
+  {
+    "sha256": "EB3205322378C85AB35ED878865C872226C925C5BB7531908CD523F4538C7BA8",
+    "path": "standalone/ui/ClientDiscovery.cs"
+  },
+  {
+    "sha256": "ED9A97AEB267BB3358C060F0075CAAABF9A0BD6115BFB6831A3C98F91AD7BA3A",
+    "path": "standalone/ui/ClientInstallationGate.cs"
+  },
+  {
+    "sha256": "1CAE69BBBA1DEC6D319D985A4F4476CB90DB38FA60E079A207EEEC6DB1F843AC",
+    "path": "standalone/ui/ClientInstallerLauncher.cs"
+  },
+  {
+    "sha256": "81FEEBE1C5AF0D9FCFAE08F1EA9E01E85F47436BE8D61200EFFDC58FCD8D13C6",
+    "path": "standalone/ui/CodexStatusReadOnlyTests.cs"
+  },
+  {
+    "sha256": "6783611680D373FFAF76EBF1465C50FAE3FA923A5D53C947F0A3A76B2626148E",
+    "path": "standalone/ui/Contracts.cs"
+  },
+  {
+    "sha256": "7C831A916780A52A7820CA142EB9964A0FB1C472C795EFDD1753CB0BE6A428C7",
+    "path": "standalone/ui/DiagnosticsDialog.cs"
+  },
+  {
+    "sha256": "90F43CCEE6B6CC637CDEF4B5A5FEB89DE0F6CF0689D1C501028F7D7CC8238997",
+    "path": "standalone/ui/FirstRunWizard.cs"
+  },
+  {
+    "sha256": "0C32C7A8512DBC6C5310B11678C8D117AAC3BF5F26AA15B6FF5007A21415584E",
+    "path": "standalone/ui/HelpDialog.cs"
+  },
+  {
+    "sha256": "00B8F3689354AE9ADFB3E7C883FA00F753DAAB80C58EBC53E29A47D816A57B1B",
+    "path": "standalone/ui/MainForm.cs"
+  },
+  {
+    "sha256": "93F3C8BFC638ED2B0D3CE2313B142EFE57141E116131DF0C7FA1632F4F115C6F",
+    "path": "standalone/ui/ProductLinks.cs"
+  },
+  {
+    "sha256": "A8E6ED1E1131D064BCCFA4AB4E9DDC0E0AB0C63ACDA40B442CBB7DDBDB32AC19",
+    "path": "standalone/ui/ProductUpdateForm.cs"
+  },
+  {
+    "sha256": "88E198092A6D190E0664038EA63ECDA0EC47B264BF906615C41D355144702191",
+    "path": "standalone/ui/Program.cs"
+  },
+  {
+    "sha256": "68391941B3E071E7B0CEF93CF42BA53C278A07DC52EFED1403DF08BAE0C51FAD",
+    "path": "standalone/ui/RouteChangeAdvisory.cs"
+  },
+  {
+    "sha256": "5F21F1620D493632B35B8ED5413E12A29AD24AD86813134756E2CC85943BE851",
+    "path": "standalone/ui/RouteChangeAdvisoryTests.cs"
+  },
+  {
+    "sha256": "452B5A9E2F4C015B7D7B489248D045B1939BBAFEE2FCD385B3CF3548AE80AEAC",
+    "path": "standalone/ui/RouteHealthPresentation.cs"
+  },
+  {
+    "sha256": "BFDDACB729F6814BAF285698685D501D53ADF557E109CCBA7EC31EE3C950D158",
+    "path": "standalone/ui/RouteHealthPresentationTests.cs"
+  },
+  {
+    "sha256": "670ADCC6590F0F062FC59ACEAC7CEB353DC1CC3A0FD9D6C36C8CC163F8916737",
+    "path": "standalone/ui/ServiceClient.cs"
+  },
+  {
+    "sha256": "079019E8A501E8C09189D09DA3CAC7C8512AA6623F9A876C461092FE01321374",
+    "path": "standalone/ui/StatusText.cs"
+  },
+  {
+    "sha256": "C795CE4E2E5A1437C044A37BCBAB2DDB2053D1F0D1BD2E0AA45430ABB19C22C5",
+    "path": "standalone/ui/SupportEmailComposer.cs"
+  },
+  {
+    "sha256": "7D4699EC5DEB6907730A5018280B8174F44623165EF9C2DEB355534B2970D21C",
+    "path": "standalone/ui/UiControls.cs"
+  },
+  {
+    "sha256": "425231D5AAC45EDD02766C1CE96809EFE33E64EC489F795588D540CF7060D594",
+    "path": "standalone/ui/UiQaHarness.cs"
+  },
+  {
+    "sha256": "F85E4AAF913FA264944F3866D81716DBE20CDC43CDB34B8D079B069A65F32B52",
+    "path": "standalone/ui/UpdateDownloadLink.cs"
+  },
+  {
+    "sha256": "8ED49FA61AF8CC745333385FB5E806711C7C1344C9F9A8EA6A110A8A1F249D97",
+    "path": "standalone/ui/UpdatePackageTransfer.cs"
+  },
+  {
+    "sha256": "859B0951B2D31C7FEDF139D11189D600FDFAA4A84E0945812F976F6AE8480368",
+    "path": "standalone/ui/UpdatePackageTransferTests.cs"
+  },
+  {
+    "sha256": "291408A82AA5FA2E352AFBD30486C81176522BCD85B622BFCAEBF7849EB2CBAB",
+    "path": "standalone/ui/WindowsRouteStatus.cs"
+  },
+  {
+    "sha256": "90D255E2931852A956E472F6DA1EB0BC73000FCF7E28F8438FD2A7D93CDA755D",
+    "path": "standalone/installer/app.manifest"
+  },
+  {
+    "sha256": "6C788F668AB5C9276563A37AEEFC97CB182D273C0EA6866D4FDEF7B5850D180A",
+    "path": "standalone/installer/ARTVpn.Setup.csproj"
+  },
+  {
+    "sha256": "AC60BC63044DC495DD5668193A558248C22F9210AA3988BAE83525BDEE0594FE",
+    "path": "standalone/installer/CodexAppLauncher.cs"
+  },
+  {
+    "sha256": "9D4B651B204E2D31043762FED9910AD2AB33D430388D332AFBBC6BF4EBE2B229",
+    "path": "standalone/installer/CodexCloseCountdownForm.cs"
+  },
+  {
+    "sha256": "27611E923B2BE97D64B34A70229A6CE437F3867903F78EF0C0CA7349C3BA274D",
+    "path": "standalone/installer/CodexRestartManager.cs"
+  },
+  {
+    "sha256": "B8859D26947ED1F00CD16B3EDB00DA1B0E5F647F16ABDDA95A256429F5CEAF61",
+    "path": "standalone/installer/CodexRestartTests.cs"
+  },
+  {
+    "sha256": "F37B008064E42A0E02214CF166DA8D15D8E4FB6AB8A9D2CF2BEDA71DD5E1A91B",
+    "path": "standalone/installer/InstallationDiagnostics.cs"
+  },
+  {
+    "sha256": "89E34CDE197293A2ACE4760845B27FE76079A3D85DBBDC4D2F531CB5BB97A6D6",
+    "path": "standalone/installer/InstallationDiagnosticsForm.cs"
+  },
+  {
+    "sha256": "CE5E44A17AB6644B07158EEE6CC9C8C7164643974AB8564C7ED17F8C254810BB",
+    "path": "standalone/installer/InstallationPreflight.cs"
+  },
+  {
+    "sha256": "EED916F5F35CA67145B9345E0A05C8CA51E8AE023F595A93A8DC2DC05EAA2883",
+    "path": "standalone/installer/InstallerLifecycle.cs"
+  },
+  {
+    "sha256": "C700E4EEB3D1BDBB6E43AE0E3728FBE78BAB5EFEDD38D9D4B6C3A9FE2EF820F9",
+    "path": "standalone/installer/InstallerProgressTests.cs"
+  },
+  {
+    "sha256": "EDE31C11A8DC459617D7A30F37842E869D96E18049BBD1D44BB9117D934A478B",
+    "path": "standalone/installer/OwnedListeners.cs"
+  },
+  {
+    "sha256": "7251F5331EACE7629F38EEE159519E669C13D8DB20E172F0631946F7B1445395",
+    "path": "standalone/installer/Program.cs"
+  },
+  {
+    "sha256": "82112952C95D91CE0E9430CAC6233BC047363D8D10DBE943FCE74DCE5C8A4F2C",
+    "path": "standalone/installer/RemovalPayloadVerifier.cs"
+  },
+  {
+    "sha256": "B64A4CAF1AB60EDA38DAACD4CF4736AD44E0F77471155B2DE0FA44A3FC914430",
+    "path": "standalone/installer/SetupConnection.cs"
+  },
+  {
+    "sha256": "8B55CA5B14CCF9A927C9CA00658DA3FFC74D99D8B95B35706220CC9B8DD3C2FA",
+    "path": "standalone/installer/SetupConnectionTests.cs"
+  },
+  {
+    "sha256": "E29F3BAC6D0BE5611923CBDEF1703008043DCB00BB601971E8BD243A73D9A9D3",
+    "path": "standalone/installer/SetupFormQa.cs"
+  },
+  {
+    "sha256": "F3A96AFB673BBC63D7CD8F642AECBB3904640608D517AC19CA45D0FA5A743B14",
+    "path": "standalone/installer/SetupProcessPageTests.cs"
+  },
+  {
+    "sha256": "66CA6F62C036BFD3A471F07D41AF5A783E32C61DC717E9CD1FD6C91A86240616",
+    "path": "standalone/installer/SetupRecommendationCard.cs"
+  },
+  {
+    "sha256": "138F2D0EE1EE37817DF945CAB230E72C8EA5A0EDB84F7E0294BA4E54F4519A16",
+    "path": "standalone/installer/StartupRepair.cs"
+  },
+  {
+    "sha256": "85FA90C3EAF5515FB1646C4FBEC10905E57E21A1B24AD0A6150297A5FB58CF50",
+    "path": "standalone/installer/UninstallRouteReturn.cs"
+  },
+  {
+    "sha256": "D7AE287CB8901154C77D9E860928F372C4CB87236675B0CD570E13D95EA3E4D4",
+    "path": "standalone/installer/UpdateSelectionReceipt.cs"
+  },
+  {
+    "sha256": "D6E182A211CD58E1F37A8DCFF57163DD35A0696A80C832FE624CC0E8A9EE7A82",
+    "path": "standalone/installer/UpgradeFileHandoff.cs"
+  }
+]

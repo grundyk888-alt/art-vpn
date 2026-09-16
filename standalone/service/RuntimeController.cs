@@ -37,6 +37,8 @@ internal sealed class ProtectedController
     private int _initialized;
     private int _prepared;
     private volatile string? _connectingRequestId;
+    private sealed record PoolRecoverySignal(long FrontRevision);
+    private PoolRecoverySignal? _pendingPoolRecovery;
 
     public ProtectedController(
         RuntimeOptions options,
@@ -64,7 +66,8 @@ internal sealed class ProtectedController
         _internetProbe = internetProbe ?? DirectInternetProbe.RunAsync;
         _routes = front is null && systemProxyStore is null ? null : new RouteModeControl(options, install.OwnerSid,
             _systemProxyStore, ProbeAndRecordRouteAsync,
-            externalTunnel: enforcePrivateAcl ? ExternalTunnelDiagnosis.Check : () => null);
+            externalTunnel: enforcePrivateAcl ? ExternalTunnelDiagnosis.Check : () => null,
+            happ: enforcePrivateAcl ? new HappRouteSession(install.OwnerSid) : null);
         _slots = front is null ? null : new SlotRuntimeManager(options, front,
             automaticAllowed: () => (_routes?.AllowsBackgroundMutation ?? false) && !HasPriorityRequest(),
             throneFallbackAllowed: () => _routes?.Mode is "Auto" or "Standby",
@@ -103,16 +106,17 @@ internal sealed class ProtectedController
 
     private async Task PrepareWithOwnerAsync(CancellationToken cancellationToken)
     {
+        if (_routes is not null) await _routes.RecoverHandoverAsync(cancellationToken).ConfigureAwait(false);
         if (_front is not null) UpdateStatus(RouteStatusPresentation.BeforeStartup);
         // Pending manual requests survive a crash and precede restoring Auto.
         while (HasPriorityRequest())
             await ProcessAvailableAsync(cancellationToken).ConfigureAwait(false);
         if (_routes is not null && !_routes.AllowsBackgroundMutation)
         {
-            if (ExternalProxyEndpoint.ForMode(_routes.Mode) is { } external)
+            if (_routes.SelectedExternal is { } external)
             {
                 var ready = await ProbeAndRecordRouteAsync(external.Port, cancellationToken).ConfigureAwait(false);
-                if (_routes.Mode != external.Mode || _systemProxyStore.Read() != _routes.Current.Expected)
+                if (_routes.SelectedExternal != external || _systemProxyStore.Read() != _routes.Current.Expected)
                 {
                     UpdateStatus(status => status with { Health = "Paused", Country = "—", Nodes = [],
                         Stability = "Подключение изменено вручную во время проверки; новый выбор сохранён" });
@@ -122,7 +126,7 @@ internal sealed class ProtectedController
                     _front.SwitchNewConnectionsTo(external.Port, "CommittedManualExternalStartup");
                 UpdateStatus(status => status with
                 {
-                    Mode = external.Mode, Health = ready ? "Fallback" : "Unavailable", Country = external.DisplayName, Nodes = [],
+                    Mode = _routes.Mode, Health = ready ? "Fallback" : "Unavailable", Country = external.DisplayName, Nodes = [],
                     Quality = ready ? "Внешний резерв проверен" : "Внешний канал не отвечает",
                     Stability = ready ? $"{external.DisplayName} проверен после запуска службы" : $"Проверьте подключение в {external.DisplayName}; ART VPN не возвращает свой прокси"
                 });
@@ -203,6 +207,15 @@ internal sealed class ProtectedController
                         _startupRestore.Schedule(DateTimeOffset.UtcNow);
                     if (_startupRestore.ShouldAttempt(DateTimeOffset.UtcNow))
                         await TryDeferredStartupRestoreAsync(stoppingToken).ConfigureAwait(false);
+                    var recovery = Interlocked.Exchange(ref _pendingPoolRecovery, null);
+                    if (recovery is not null && _front?.Revision == recovery.FrontRevision &&
+                        (_routes?.AllowsBackgroundMutation ?? true))
+                    {
+                        // Only the existing monitor's confirmed failure may
+                        // start a cold reserve. A healthy ART never starts HAPP.
+                        if (await RunPreemptibleAsync(TryThroneFallbackAsync, stoppingToken).ConfigureAwait(false)) continue;
+                        _subscriptionRefresh.RequestRecovery(DateTimeOffset.UtcNow);
+                    }
                     if (DateTimeOffset.UtcNow >= nextUpdateCheck)
                     {
                         nextUpdateCheck = DateTimeOffset.UtcNow.AddHours(6);
@@ -278,7 +291,7 @@ internal sealed class ProtectedController
     {
         if (_front is null || _routes is null || _routes.ManualRequestPending) return;
         var state = _routes.Current;
-        var external = ExternalProxyEndpoint.ForMode(state.Mode);
+        var external = _routes.SelectedExternal;
         if (external is null || _front.TargetPort == external.Port || state.Phase != "Committed" ||
             state.Expected.ProxyEnable != 1 || state.Expected.ProxyServer != $"127.0.0.1:{external.Port}" ||
             !string.IsNullOrWhiteSpace(state.Expected.AutoConfigUrl) || _systemProxyStore.Read() != state.Expected) return;
@@ -299,6 +312,7 @@ internal sealed class ProtectedController
             var selector = config.RootElement.GetProperty("outbounds").EnumerateArray()
                 .Single(item => item.GetProperty("tag").GetString() == "art-codex-auto");
             return qualification?.CoreSha256 == RuntimeAssetVerifier.ExpectedCoreSha256 &&
+                qualification.Evidence.Length > 0 && qualification.Evidence.All(item => item.RoundsRequested >= 6) &&
                 selector.GetProperty("expected").GetInt32() == selector.GetProperty("outbounds").GetArrayLength() &&
                 selector.GetProperty("dial_failure_threshold").GetInt32() == 3;
         }
@@ -328,13 +342,14 @@ internal sealed class ProtectedController
         {
             var result = await RunPreemptibleAsync(token => RefreshAsync(request, token), cancellationToken,
                 requiresAutomaticMode: true).ConfigureAwait(false);
-            if (result.DetailCode == "ProviderGenerationQualifiedAndActivated") _subscriptionRefresh.Succeeded(DateTimeOffset.UtcNow);
-            else _subscriptionRefresh.Failed(DateTimeOffset.UtcNow, _slots is { HasActiveChannel: true });
+            _subscriptionRefresh.ObserveResult(result.DetailCode, DateTimeOffset.UtcNow,
+                _slots is { HasActiveChannel: true });
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch (Exception ex)
         {
-            _subscriptionRefresh.Failed(DateTimeOffset.UtcNow, _slots is { HasActiveChannel: true });
+            _subscriptionRefresh.ObserveResult(ErrorCodes.From(ex), DateTimeOffset.UtcNow,
+                _slots is { HasActiveChannel: true });
             SafeLog.Write(_options.DataRoot, ErrorCodes.From(ex));
         }
         return true;
@@ -452,8 +467,8 @@ internal sealed class ProtectedController
 
         if (request?.Action == "RefreshSubscription")
         {
-            if (result.DetailCode == "ProviderGenerationQualifiedAndActivated") _subscriptionRefresh.Succeeded(DateTimeOffset.UtcNow);
-            else _subscriptionRefresh.Failed(DateTimeOffset.UtcNow, _slots is { HasActiveChannel: true });
+            _subscriptionRefresh.ObserveResult(result.DetailCode, DateTimeOffset.UtcNow,
+                _slots is { HasActiveChannel: true });
         }
         AtomicFile.WriteJson(resultPath, result);
         File.Delete(processing);
@@ -536,9 +551,14 @@ internal sealed class ProtectedController
                 return await SelectModeAsync(request, "Auto", cancellationToken).ConfigureAwait(false);
             case "RestoreSystemProxy":
                 if (_routes is null) return ControllerRequestResult.Deferred(request, "HealthCheckRuntimeUnavailable");
-                var restored = _routes.RestorePrevious();
-                try { await EnterExternalStandbyAsync(cancellationToken).ConfigureAwait(false); }
-                catch { SafeLog.Write(_options.DataRoot, "ExternalStandbyReconciliationPending"); }
+                var restored = await _routes.RestorePreviousAsync(cancellationToken).ConfigureAwait(false);
+                // A rejected native return may have safely retained ART.
+                // Do not label that working connection paused/external.
+                if (restored.Status == "Completed" || !SystemProxyLeaseCoordinator.IsArtVpnEndpoint(_systemProxyStore.Read()))
+                {
+                    try { await EnterExternalStandbyAsync(cancellationToken).ConfigureAwait(false); }
+                    catch { SafeLog.Write(_options.DataRoot, "ExternalStandbyReconciliationPending"); }
+                }
                 return new ControllerRequestResult(1, "art-vpn-controller-result", request.RequestId,
                     restored.Status, restored.DetailCode, "", DateTimeOffset.UtcNow.ToString("o"), restored.Changed, false);
             case "Rollback":
@@ -609,7 +629,9 @@ internal sealed class ProtectedController
         {
             while (!observer.IsCancellationRequested)
             {
-                if (HasPriorityRequest() || (requiresAutomaticMode && _routes is not null && !_routes.AllowsBackgroundMutation))
+                if (HasPriorityRequest() || (requiresAutomaticMode && _routes is not null &&
+                    (!_routes.AllowsBackgroundMutation || RecoveryPreemptsRefinement(requiresAutomaticMode,
+                        Volatile.Read(ref _pendingPoolRecovery) is not null, _routes.Mode))))
                 {
                     work.Cancel();
                     return;
@@ -626,6 +648,9 @@ internal sealed class ProtectedController
             catch { SafeLog.Write(_options.DataRoot, "ControlObserverReadFailed"); }
         }
     }
+
+    internal static bool RecoveryPreemptsRefinement(bool background, bool confirmedFailure, string mode) =>
+        background && confirmedFailure && mode == "Auto";
 
     private async Task<bool> ProbeSelectedRouteAsync(int port, CancellationToken cancellationToken)
     {
@@ -732,9 +757,11 @@ internal sealed class ProtectedController
         var connectSubscription = request.Action == "ConnectSubscription";
         var previousGeneration = connectSubscription ? ActiveGenerationStore.TryRead(_options) : null;
         string? preparedGeneration = null;
-        var initialProxy = _systemProxyStore.Read();
         var result = await _routes.SelectAsync(request.RequestId, mode, async token =>
         {
+            // Native HAPP disconnect may restore its prior proxy. The CAS for
+            // ART preparation starts after that verified handover, not before.
+            var initialProxy = _systemProxyStore.Read();
             if (_front is not { IsServing: true } || _slots is null) return false;
             if (connectSubscription)
             {
@@ -842,7 +869,7 @@ internal sealed class ProtectedController
             {
                 Update = result.Status switch
                 {
-                    "Available" => $"доступна версия {result.AvailableVersion} • установка только после подтверждения",
+                    "Available" => $"доступна сборка {result.AvailableVersion} • нажмите «Проверить обновления»",
                     "Current" => $"проверено • установлена актуальная версия {result.CurrentVersion}",
                     "Deferred" => "новая версия разворачивается постепенно • текущая сохранена",
                     "ChannelUnavailable" => "канал обновлений закрыт • текущая версия сохранена; связь VPN не затронута",
@@ -868,11 +895,15 @@ internal sealed class ProtectedController
     {
         if (!explicitConnection && _routes is not null && !_routes.AllowsBackgroundMutation)
             return ControllerRequestResult.Deferred(request, "SubscriptionRefreshPausedByManualRoute");
+        if (!explicitConnection && _slots is not null &&
+            !await _slots.CanStageReplacementAsync(cancellationToken).ConfigureAwait(false))
+            return DeferRefreshUntilDrained(request);
+        var preserveHistory = _slots is { HasActiveChannel: true };
         UpdateStatus(status => status with
         {
             Health = status.Health == "Healthy" || status.Health == "Fallback" ? status.Health : "Checking",
             Subscription = "новый список загружается и проверяется отдельно",
-            LastSwitchReason = "Рабочий канал сохранён на время обновления подписки"
+            LastSwitchReason = preserveHistory ? status.LastSwitchReason : "Рабочий канал сохранён на время обновления подписки"
         });
 
         byte[]? secret = null;
@@ -900,7 +931,7 @@ internal sealed class ProtectedController
                 Nodes = status.Nodes.Length > 0 ? status.Nodes : stagedCards,
                 Subscription = $"получена • {staged.SupportedNodes} узлов • страны: {string.Join(", ", staged.Countries)}",
                 SubscriptionAtUtc = staged.StagedAtUtc,
-                LastSwitchReason = "Встроенный ART VPN проверяет узлы; Throne для запуска не требуется",
+                LastSwitchReason = preserveHistory ? status.LastSwitchReason : "Встроенный ART VPN проверяет узлы; Throne для запуска не требуется",
                 Stability = status.Stability == "—" ? "проверка выполняется встроенным VPN-ядром" : status.Stability
             });
             if (_slots is not null && RuntimeAssetVerifier.IsInstalled(_options))
@@ -951,6 +982,12 @@ internal sealed class ProtectedController
             });
             return ControllerRequestResult.Completed(request, "ProviderGenerationStagedForQualification", staged.GenerationId);
         }
+        catch (InvalidOperationException ex) when (!explicitConnection && ex.Message == "InactiveSlotStillDraining")
+        {
+            // Connections can appear after the preflight. Preserve them and
+            // retry later; this says nothing about subscription validity.
+            return DeferRefreshUntilDrained(request);
+        }
         catch (Exception ex)
         {
             if (ex is OperationCanceledException)
@@ -972,6 +1009,7 @@ internal sealed class ProtectedController
                 "ProviderHttpRejected" => "сервер подписки временно не ответил • предыдущий пул сохранён",
                 "QualifiedPoolEmpty" or "PrefilterEmpty" => "ни один проверенный узел пока не прошёл все проверки доступа и стабильности • повторите позже",
                 "QualifiedPoolInsufficient" or "PrefilterInsufficient" => "проверку прошло недостаточно узлов для требуемого резерва • рабочий пул сохранён",
+                "CoreCheckTimedOut" => "Проверка ядра задержалась. Повторим автоматически; настройки сохранены.",
                 _ => "обновление отклонено • предыдущий рабочий пул сохранён"
             };
             if (!hasAcceptedGeneration && _slots is not null && (code is "QualifiedPoolEmpty" or "PrefilterEmpty"))
@@ -998,12 +1036,34 @@ internal sealed class ProtectedController
         }
     }
 
+    private ControllerRequestResult DeferRefreshUntilDrained(QueuedRequest request)
+    {
+        UpdateStatus(status => status with
+        {
+            Subscription = "Подбор продолжится после завершения прежних соединений. VPN работает."
+        });
+        return ControllerRequestResult.Deferred(request, SubscriptionRefreshScheduler.WaitingForDrain);
+    }
+
     private async Task<bool> TryThroneFallbackAsync(CancellationToken cancellationToken)
     {
         if (_front is null || (_routes is not null && (!_routes.AllowsBackgroundMutation || _routes.Mode == "ArtVpn")) || HasPriorityRequest()) return false;
         try
         {
             var externalPort = _routes?.ExternalReservePort ?? 2080;
+            if (_routes is { Mode: "Auto" } && externalPort == 10809 && _enforcePrivateAcl)
+            {
+                var fallback = await _routes.SelectAsync(Guid.NewGuid().ToString("N"), "Happ",
+                    _ => Task.FromResult(false), cancellationToken, automaticFallback: true).ConfigureAwait(false);
+                if (fallback.Status != "Completed") return false;
+                _front.SwitchNewConnectionsTo(10809, "VerifiedNativeAutoFallback");
+                _startupRestore.Cancel();
+                UpdateStatus(status => status with { Mode = "Auto", Health = "Fallback", Country = "HAPP", Nodes = [],
+                    LastSwitchAtUtc = DateTimeOffset.UtcNow.ToString("o"),
+                    LastSwitchReason = "ART VPN не прошёл проверку. HAPP запущен и проверен как резерв.",
+                    Stability = "Авто: работает HAPP. Кнопка «Авто» повторно проверит ART VPN." });
+                return true;
+            }
             var sample = await LiveProbeTransport.RunAsync(externalPort, 1_048_576, cancellationToken).ConfigureAwait(false);
             if (!(sample.OpenAi && sample.ChatGpt && sample.Telegram && sample.Integrity) ||
                 sample.HardDegradation) return false;
@@ -1029,6 +1089,13 @@ internal sealed class ProtectedController
     private Task ApplyWatchdogDecisionAsync(WatchdogDecision decision)
     {
         if (_routes is not null && !_routes.AllowsBackgroundMutation) return Task.CompletedTask;
+        // The monitor only signals. The serial controller performs qualification
+        // with the usual ownership, cancellation and commit guards; no new loop
+        // or external watchdog/task and no killing an existing VPN process.
+        if (NeedsPoolRecovery(decision))
+            Interlocked.Exchange(ref _pendingPoolRecovery, new PoolRecoverySignal(_front?.Revision ?? 0));
+        else if (decision.ReasonCode == "CurrentChannelHealthy" || decision.Action == "SwitchNewConnections")
+            Interlocked.Exchange(ref _pendingPoolRecovery, null);
         if (decision.Action == "RestartActive")
         {
             UpdateStatus(status => status with
@@ -1067,7 +1134,10 @@ internal sealed class ProtectedController
         {
             UpdateStatus(status => status with
             {
-                Stability = $"наблюдаем канал: подтверждений сбоя {decision.FailureCount} из 3",
+                Health = decision.FailureCount >= 3 ? "Unavailable" : status.Health,
+                SafeRepairAvailable = decision.FailureCount >= 3 || status.SafeRepairAvailable,
+                Stability = decision.FailureCount >= 3 ? "Связь не подтверждена; ищем рабочий канал"
+                    : $"наблюдаем канал: подтверждений сбоя {decision.FailureCount} из 3",
                 LastSwitchReason = decision.ReasonCode == "NoPrequalifiedReserve"
                     ? "Сбой подтверждён, но исправного резерва нет. Живой VPN не перезапускался; открытые соединения сохранены"
                     : decision.ReasonCode == "TlsFailureObservedAndQuarantined"
@@ -1104,6 +1174,9 @@ internal sealed class ProtectedController
         }
         return Task.CompletedTask;
     }
+
+    internal static bool NeedsPoolRecovery(WatchdogDecision decision) =>
+        decision.Action == "KeepCurrent" && decision.ReasonCode == "NoPrequalifiedReserve" && decision.FailureCount >= 3;
 
     internal static SanitizedServiceStatus MergeRefreshFailure(
         SanitizedServiceStatus current, bool acceptedGeneration, string message, DateTimeOffset now)
@@ -1472,6 +1545,7 @@ internal sealed class StartupRestoreRetryPolicy
 {
     private int _failures;
 
+
     public int Failures => _failures;
     public bool Pending { get; private set; }
     public DateTimeOffset NextAttemptUtc { get; private set; }
@@ -1505,8 +1579,11 @@ internal sealed class StartupRestoreRetryPolicy
 
 internal sealed class SubscriptionRefreshScheduler
 {
+    internal const string WaitingForDrain = "SubscriptionRefreshWaitingForDrain";
     private readonly string _installId;
     private int _failures;
+    private int _checkTimeouts;
+    private DateTimeOffset _nextRecoveryAllowed;
 
     public SubscriptionRefreshScheduler(string installId)
     {
@@ -1528,10 +1605,41 @@ internal sealed class SubscriptionRefreshScheduler
 
     public bool ShouldRun(DateTimeOffset now) => Initialized && now >= NextRunUtc;
 
+    public bool RequestRecovery(DateTimeOffset now)
+    {
+        if (now < _nextRecoveryAllowed) return false;
+        _nextRecoveryAllowed = now.AddMinutes(2);
+        Initialized = true;
+        NextRunUtc = now;
+        return true;
+    }
+
+    public void ObserveResult(string detailCode, DateTimeOffset now, bool activeGenerationReady)
+    {
+        if (detailCode == WaitingForDrain)
+        {
+            // Cheap read-only preflight every 30 seconds, not a provider fetch
+            // or another full qualification. Do not consume failure backoff.
+            Initialized = true;
+            NextRunUtc = now.AddSeconds(30);
+        }
+        else if (detailCode == "CoreCheckTimedOut")
+        {
+            // A valid list was not evaluated. Do not postpone first refinement
+            // for 30+ minutes, but bound retries under persistent contention.
+            Initialized = true;
+            NextRunUtc = now.AddSeconds(30 * (1 << Math.Min(_checkTimeouts, 3)));
+            _checkTimeouts = Math.Min(_checkTimeouts + 1, 3);
+        }
+        else if (detailCode == "ProviderGenerationQualifiedAndActivated") Succeeded(now);
+        else Failed(now, activeGenerationReady);
+    }
+
     public void Succeeded(DateTimeOffset now)
     {
         Initialized = true;
         _failures = 0;
+        _checkTimeouts = 0;
         NextRunUtc = now.AddHours(12).Add(Jitter("success", 45));
     }
 
@@ -1565,9 +1673,16 @@ internal sealed class SubscriptionRefreshScheduler
         NextRunUtc = now.Add(delay);
     }
 
-    // Share the scheduler's minimum delay contract; a committed connection
-    // must not be reported as failed because of an invalid scheduling value.
-    public void AfterFirstConnection(DateTimeOffset now) => Defer(now, TimeSpan.FromMinutes(5));
+    // One early refinement after an explicit first connection. This is not
+    // generic retry/backoff: regular refreshes retain their existing bounds.
+    // The controller still requires Auto and preempts for a manual command.
+    public void AfterFirstConnection(DateTimeOffset now)
+    {
+        Initialized = true;
+        _failures = 0;
+        _checkTimeouts = 0;
+        NextRunUtc = now.AddSeconds(30);
+    }
 
     private TimeSpan Jitter(string phase, int maximumMinutes)
     {

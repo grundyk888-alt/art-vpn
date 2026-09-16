@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "artifact": "ARTVpnCore.exe",
+  "sha256": "BF0866CCD7508755E64A12E54EF653729947F3CEE95F96450B2E5411577AAD61",
+  "bytes": 81978368,
+  "sourceArchive": "ARTVpnCore-corresponding-source.zip",
+  "sourceArchiveSha256": "9D86362C372BD638876AA47BE68F793FE302889ECBCD29DB24CB3B74CE97D9CB",
+  "sourceManifestSha256": "71867995F76A872BC322E993C6BD38827758C56393F36D0CB5635F6837432DB0",
+  "sourceFiles": 1491,
+  "goVersion": "go1.25.5",
+  "reproducible": true,
+  "targetedTests": "protocol/group, common/urltest, experimental/clashapi; full Windows release tags; count=3; go vet; three byte-identical builds verified 2026-09-11",
+  "coreUpstream": "https://github.com/Throneproj/sing-box",
+  "generatedAtUtc": "2026-09-12T06:54:27.7926507+00:00"
+}

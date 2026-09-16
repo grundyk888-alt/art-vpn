@@ -58,6 +58,24 @@ internal sealed class SlotRuntimeManager : IAsyncDisposable
     }
     public bool HasActiveChannel => ObservedActivePort != 0;
 
+    // A refresh must not spend minutes probing a generation that cannot yet
+    // replace its physical slot. This is only an early read-only check; the
+    // activation guard below remains authoritative if connections change.
+    public async Task<bool> CanStageReplacementAsync(CancellationToken cancellationToken)
+    {
+        await _mutation.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            RequireAutomaticOwnership();
+            var active = ActiveGenerationStore.TryRead(_options);
+            var slot = active?.Slot == "A" ? "B" : "A";
+            var port = slot == "A" ? 22086 : 22087;
+            return !_leases.ContainsKey(slot) ||
+                (_front.ActiveConnectionsFor(port) == 0 && !_hasDirectConnections(port));
+        }
+        finally { _mutation.Release(); }
+    }
+
     public SlotRuntimeManager(
         RuntimeOptions options,
         StableFrontHost front,
@@ -138,7 +156,15 @@ internal sealed class SlotRuntimeManager : IAsyncDisposable
                 "runtime", "sealed-runtime", candidate.ProxyPort, candidate.ProxyPort, new string('a', 32));
             var accepted = NodeQualificationRunner.Summarize(identity, 2, samples);
             if (!accepted.Clean || accepted.EgressIpChanges != 0)
+            {
+                // Retain bounded, secret-free evidence for installation
+                // diagnostics; a rejection must not look like an unexplained
+                // timeout. No subscription/server URL or public IP is stored.
+                SafeLog.Write(_options.DataRoot, $"ActivationRejected.Clean={accepted.Clean}.EgressChanges={accepted.EgressIpChanges}");
+                foreach (var sample in samples)
+                    SafeLog.Write(_options.DataRoot, $"ActivationSample.OpenAi={sample.OpenAi}.ChatGpt={sample.ChatGpt}.Telegram={sample.Telegram}.Integrity={sample.Integrity}.RemoteConnect={sample.RemoteConnect}");
                 throw new InvalidDataException("InactiveSlotAcceptanceRejected");
+            }
             cancellationToken.ThrowIfCancellationRequested();
             RequireOwnership();
 
@@ -951,8 +977,11 @@ internal static class SlotRuntimeManagerTests
                 File.WriteAllText(bPath, "{}", Encoding.UTF8);
                 var nextCandidate = candidate with { Slot = "B", ProxyPort = 22087, ApiPort = 22097, ConfigPath = bPath };
                 await drainManager.ActivateAsync(nextCandidate, CancellationToken.None);
+                Assert(await drainManager.CanStageReplacementAsync(CancellationToken.None));
                 directHeld = true;
                 var revision = front.Revision;
+                Assert(!await drainManager.CanStageReplacementAsync(CancellationToken.None) &&
+                       owned.Count == 2 && !owned[0].Disposed && front.Revision == revision);
                 try
                 {
                     await drainManager.ActivateAsync(candidate, CancellationToken.None);
@@ -965,16 +994,24 @@ internal static class SlotRuntimeManagerTests
                 directInspectionFailed = true;
                 try
                 {
+                    await drainManager.CanStageReplacementAsync(CancellationToken.None);
+                    throw new InvalidDataException("UnknownDrainPreflightDidNotReject");
+                }
+                catch (IOException ex) when (ex.Message == "TestConnectionTableUnavailable") { }
+                Assert(!owned[0].Disposed && front.Revision == revision);
+                try
+                {
                     await drainManager.ActivateAsync(candidate, CancellationToken.None);
                     throw new InvalidDataException("UnknownDirectDrainDidNotReject");
                 }
                 catch (IOException ex) when (ex.Message == "TestConnectionTableUnavailable") { }
                 Assert(!owned[0].Disposed && front.Revision == revision && owned.Count == 2);
                 directInspectionFailed = false;
+                Assert(await drainManager.CanStageReplacementAsync(CancellationToken.None));
                 await drainManager.ActivateAsync(candidate, CancellationToken.None);
                 Assert(owned[0].Disposed && !owned[1].Disposed && owned.Count == 3 && front.TargetPort == 22086);
             }
-            return new SlotRuntimeManagerTestReceipt("Passed", 27, true, true, true, false, false);
+            return new SlotRuntimeManagerTestReceipt("Passed", 31, true, true, true, false, false);
         }
         finally
         {

@@ -29,9 +29,10 @@ self-contained .NET binaries; source publication alone is not that final bundle.
 ## Routing data and optional clients
 
 The source references rule data maintained by MetaCubeX/meta-rules-dat,
-hiddify/hiddify-geo and runetfreedom/russia-v2ray-rules-dat. Rule data is not vendored
-in this initial public source snapshot. The future portable installer must include
-its exact manifest, checksums and applicable upstream terms.
+hiddify/hiddify-geo and runetfreedom/russia-v2ray-rules-dat. The release's exact
+rule data and manifest are in `payload-template/runtime/rules`. The installer
+includes its payload manifest and component notices; maintain checksums and
+applicable upstream terms in each release.
 
 Throne and HAPP are optional separately installed external clients, not implied
 to be ART VPN-owned code. Their availability, terms and functionality are separate.

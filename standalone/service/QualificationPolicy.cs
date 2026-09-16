@@ -68,16 +68,16 @@ internal static class QualificationPolicy
                 eligible.Add(result);
         }
         if (seen.Count != manifest.Count) throw new InvalidDataException("QualificationCoverageRejected");
-        // Prefer full-service nodes only during qualification; do not cut a live OpenAI session for Google.
-        var ranked = eligible.OrderBy(item => GoogleReachability.Rank(item.GoogleAvailabilityPct))
-            .ThenBy(item => item.ScoreMs).ThenByDescending(item => item.ThroughputFloorMbps)
+        // Codex responsiveness first. Google only resolves equal scores and
+        // never overrides a healthy incumbent's anti-flapping margin.
+        var ranked = eligible.OrderBy(item => item.ScoreMs)
+            .ThenBy(item => GoogleReachability.Rank(item.GoogleAvailabilityPct)).ThenByDescending(item => item.ThroughputFloorMbps)
             .ThenBy(item => item.Tag, StringComparer.Ordinal).ToList();
         if (ranked.Count == 0) throw new InvalidDataException("QualifiedPoolEmpty");
         if (ranked.Count < minimum) throw new InvalidDataException("QualifiedPoolInsufficient");
         var primary = ranked[0];
         var incumbent = ranked.SingleOrDefault(item => item.Tag == previousPrimaryTag);
-        if (incumbent is not null && GoogleReachability.Rank(incumbent.GoogleAvailabilityPct) <= GoogleReachability.Rank(primary.GoogleAvailabilityPct)
-            && incumbent.ScoreMs <= primary.ScoreMs / 0.75 + 25)
+        if (incumbent is not null && incumbent.ScoreMs <= primary.ScoreMs / 0.75 + 25)
             primary = incumbent;
 
         var selected = new List<NodeProbeEvidence> { primary };
@@ -279,7 +279,7 @@ internal static class QualificationPolicyTests
         Assert(incumbent.PrimaryTag == "n-1");
         var browserEvidence = evidence.Select(item => item with { GoogleAvailabilityPct = 100 }).ToArray();
         browserEvidence[0] = browserEvidence[0] with { GoogleAvailabilityPct = 0 };
-        Assert(QualificationPolicy.Select(manifest, browserEvidence, previousPrimaryTag: "n-0", maximum: 4).PrimaryTag == "n-1");
+        Assert(QualificationPolicy.Select(manifest, browserEvidence, previousPrimaryTag: "n-0", maximum: 4).PrimaryTag == "n-0");
         Assert(QualificationPolicy.Select(manifest, evidence.Select(item => item with { GoogleAvailabilityPct=0 }).ToArray(), maximum:4).PoolTags.Length==4);
         Assert(GoogleReachability.Classify(429)=="VerificationRequired" && GoogleReachability.Classify(200)=="Available");
         var bad = evidence.ToArray();

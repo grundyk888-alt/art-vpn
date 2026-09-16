@@ -131,14 +131,8 @@ internal static class CodexProxyCompatibility
                 if (File.Exists(receipt) && !IsReparse(receipt) && new FileInfo(receipt).Length < 4096)
                 {
                     var at = JsonSerializer.Deserialize<DateTimeOffset>(File.ReadAllText(receipt, StrictUtf8));
-                    foreach (var process in Process.GetProcessesByName("codex"))
-                        using (process)
-                            try
-                            {
-                                if (process.StartTime.ToUniversalTime() < at.UtcDateTime)
-                                    return new("RestartSuggested", "Маршрут Codex исправлен. Один раз закройте и откройте Codex, чтобы восстановить удалённый доступ; VPN не выключайте.", result.Changed);
-                            }
-                            catch (InvalidOperationException) { }
+                    if (CodexClientProcesses.IsRunningInCurrentSession(at))
+                        return new("RestartSuggested", "Маршрут Codex исправлен. Один раз закройте и откройте Codex / ChatGPT, чтобы пересоздать соединения; VPN не выключайте.", result.Changed);
                 }
                 return result;
             }
@@ -220,4 +214,34 @@ internal static class CodexProxyCompatibility
 
     private static bool IsReparse(string path) => (File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0;
     private static CodexProxyResult Ready() => new("Ready", "Прокси в настройках Codex совпадает с выбранным входом. Связь и удалённый доступ проверяются отдельно.");
+}
+
+// Новый пакет OpenAI.Codex запускает ChatGPT.exe, старый — Codex.exe.
+// Это только подсказка пользователю: процессы и их соединения не завершаем.
+internal static class CodexClientProcesses
+{
+    internal static bool Matches(string name, int session, int currentSession, bool exited) =>
+        !exited && session == currentSession &&
+        (name.Equals("codex", StringComparison.OrdinalIgnoreCase) || name.Equals("chatgpt", StringComparison.OrdinalIgnoreCase));
+
+    internal static bool IsRunningInCurrentSession(DateTimeOffset? startedBefore = null)
+    {
+        using var current = Process.GetCurrentProcess();
+        foreach (var name in new[] { "codex", "ChatGPT" })
+        {
+            var processes = Process.GetProcessesByName(name);
+            try
+            {
+                foreach (var process in processes)
+                    try
+                    {
+                        if (Matches(process.ProcessName, process.SessionId, current.SessionId, process.HasExited) &&
+                            (startedBefore is null || process.StartTime.ToUniversalTime() < startedBefore.Value.UtcDateTime)) return true;
+                    }
+                    catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception) { }
+            }
+            finally { foreach (var process in processes) process.Dispose(); }
+        }
+        return false;
+    }
 }

@@ -1,9 +1,4 @@
 {
-  "schema": 1,
-  "product": "ART VPN",
-  "version": "1.0.19",
-  "channel": "candidate",
-  "engineContract": 1,
-  "minimumWindowsBuild": 17763,
-  "published": false
+  "version": "1.0.40",
+  "displayVersion": "ART VPN 1.0"
 }

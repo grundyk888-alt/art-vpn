@@ -9,14 +9,15 @@ internal static class QuattroRecommendation
     internal const string Url = "https://quattro.app/register?ref=_oxkaWjifVhzEeUH";
     internal const string Title = "Рекомендуем Quattro VPN";
     internal const string ButtonText = "Выбрать Quattro VPN";
+    internal const string BenefitText = "Для доступа при блокировках.\nБольшой выбор стран.";
 
-    internal static Panel CreateCard(string name, int width, Action<string>? openWebsite = null)
+    internal static Panel CreateCard(string name, int width, Action<string>? openWebsite = null, bool prominent = false)
     {
-        var blue = Color.FromArgb(47, 111, 235);
+        var blue = Color.FromArgb(48, 94, 157);
         var card = new Panel
         {
             Name = name, Width = width, Height = 128,
-            BackColor = Color.FromArgb(234, 241, 255),
+            BackColor = prominent ? Color.FromArgb(233, 240, 255) : Color.FromArgb(235, 241, 249),
             Padding = new Padding(18, 10, 18, 10),
             Margin = new Padding(0, 0, 0, 16),
             AccessibleName = Title
@@ -39,7 +40,7 @@ internal static class QuattroRecommendation
         };
         var description = new Label
         {
-            Text = "Большой выбор стран для подбора устойчивого канала.",
+            Text = BenefitText,
             Dock = DockStyle.Fill, Margin = new Padding(0, 0, 14, 0),
             TextAlign = ContentAlignment.MiddleLeft,
             ForeColor = Color.FromArgb(56, 70, 94), Font = new Font("Segoe UI", 9.5f)
@@ -53,6 +54,19 @@ internal static class QuattroRecommendation
             AccessibleDescription = "Открыть сайт Quattro VPN в браузере. Текущая подписка и подключение не изменятся."
         };
         button.FlatAppearance.BorderColor = blue;
+        if (prominent)
+        {
+            button.BackColor = blue;
+            button.ForeColor = Color.White;
+            button.FlatAppearance.MouseOverBackColor = Color.FromArgb(37, 76, 133);
+            card.Paint += (_, e) =>
+            {
+                using var pen = new Pen(Color.FromArgb(175, 196, 232));
+                e.Graphics.DrawRectangle(pen, 0, 0, card.ClientSize.Width - 1, card.ClientSize.Height - 1);
+                using var accent = new SolidBrush(blue);
+                e.Graphics.FillRectangle(accent, 0, 0, Math.Max(3, card.DeviceDpi / 24), card.ClientSize.Height);
+            };
+        }
         button.Click += (_, _) => (openWebsite ?? OpenWebsite)(Url);
         var choice = new Label
         {

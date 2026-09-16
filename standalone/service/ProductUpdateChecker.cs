@@ -31,7 +31,8 @@ internal sealed record ProductUpdateCheckReceipt(
     string CheckedAtUtc,
     bool UserActionRequired,
     bool ContainsProviderSecret,
-    string PackageUri = "");
+    string PackageUri = "",
+    string SignedManifest = "");
 
 internal static partial class ProductUpdateChecker
 {
@@ -81,7 +82,8 @@ internal static partial class ProductUpdateChecker
                 return Write(options, install.Version, "Current", verified.Version, "LatestVersionInstalled", now, false);
             if (!verified.EligibleForInstall)
                 return Write(options, install.Version, "Deferred", verified.Version, "DeferredByRollout", now, false);
-            return Write(options, install.Version, "Available", verified.Version, "SignedUpdateAvailable", now, true, verified.PackageUri.AbsoluteUri);
+            return Write(options, install.Version, "Available", verified.Version, "SignedUpdateAvailable", now, true,
+                verified.PackageUri.AbsoluteUri, json);
         }
         finally { CryptographicOperations.ZeroMemory(payload); }
     }
@@ -119,10 +121,10 @@ internal static partial class ProductUpdateChecker
 
     private static ProductUpdateCheckReceipt Write(
         RuntimeOptions options, string current, string status, string available, string code,
-        DateTimeOffset now, bool userActionRequired, string packageUri = "")
+        DateTimeOffset now, bool userActionRequired, string packageUri = "", string signedManifest = "")
     {
         var receipt = new ProductUpdateCheckReceipt(1, "art-vpn-update-check", status, current, available,
-            code, now.ToString("o"), userActionRequired, false, packageUri);
+            code, now.ToString("o"), userActionRequired, false, packageUri, signedManifest);
         AtomicFile.ReplaceJson(options.UpdateCheckReceiptPath, receipt);
         return receipt;
     }
