@@ -1,7 +1,7 @@
 namespace ArtSport.ArtVpn.Common;
 
 // One immutable acceptance baseline is shared by downloader and user-session launcher.
-// The exact official HAPP asset was checked in an isolated Windows 10 lab, including its valid
+// The exact official HAPP asset was checked on ART-TEST-WIN10, including its valid
 // Flyfrog LLC Authenticode signature. A changed upstream file is never accepted.
 internal static class AcceptedClientRelease
 {
