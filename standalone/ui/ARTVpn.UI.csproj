@@ -21,6 +21,9 @@
     <DebugType>embedded</DebugType>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="..\common\UpdateJson.cs" Link="Common\UpdateJson.cs" />
+    <Compile Include="..\service\SignedUpdatePolicy.cs" Link="Common\SignedUpdatePolicy.cs" />
+    <Compile Include="..\common\ProviderConnectionClient.cs" Link="Common\ProviderConnectionClient.cs" />
     <Compile Include="..\..\integration\VpnMaintenanceLauncher.cs" Link="Shared\VpnMaintenanceLauncher.cs" />
     <Compile Include="..\common\ExternalProxyEndpoint.cs" Link="Common\ExternalProxyEndpoint.cs" />
     <Compile Include="..\common\ConnectionProblemText.cs" Link="Common\ConnectionProblemText.cs" />

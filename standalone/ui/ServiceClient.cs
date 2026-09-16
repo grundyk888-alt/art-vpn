@@ -6,13 +6,13 @@ using System.Security.Principal;
 using System.Text;
 using System.Text.Json;
 using ArtSport.Vpn.Shared;
+using ArtSport.ArtVpn.Common;
 
 namespace ArtSport.ArtVpn.Ui;
 
 internal sealed class ServiceClient : IArtVpnUiController
 {
     private const string ControlPipe = "ARTSPORT.ARTVpn.Control.v1";
-    private const string ProvisionPipe = "ARTSPORT.ARTVpn.Provision.v1";
     private const string StatusPath = @"C:\ProgramData\ART VPN\state\status.v1.json";
     private const string SupportReportPath = @"C:\ProgramData\ART VPN\reports\latest-support.v1.json";
     private const string ResultRoot = @"C:\ProgramData\ART VPN\state\results";
@@ -66,33 +66,30 @@ internal sealed class ServiceClient : IArtVpnUiController
     {
         if (mode is not ("Auto" or "ArtVpn" or "Throne" or "Happ"))
             return new(false, "Этот режим пока не поддерживается.", "ControllerModeRejected");
+        var beganAt = DateTimeOffset.UtcNow;
         var result = await SendControlAsync("SetMode", "mode", mode, cancellationToken).ConfigureAwait(false);
-        return await CompleteRouteChangeAsync(result).ConfigureAwait(false);
+        return await CompleteRouteChangeAsync(result, beganAt).ConfigureAwait(false);
     }
 
     public async Task<UiOperationResult> EnableSystemProxyAsync(CancellationToken cancellationToken)
     {
+        var beganAt = DateTimeOffset.UtcNow;
         var result = await SendControlAsync("EnableSystemProxy", null, null, cancellationToken).ConfigureAwait(false);
-        return await CompleteRouteChangeAsync(result).ConfigureAwait(false);
+        return await CompleteRouteChangeAsync(result, beganAt).ConfigureAwait(false);
     }
 
     public async Task<UiOperationResult> RestoreSystemProxyAsync(CancellationToken cancellationToken)
     {
+        var beganAt = DateTimeOffset.UtcNow;
         var result = await SendControlAsync("RestoreSystemProxy", null, null, cancellationToken).ConfigureAwait(false);
-        return await CompleteRouteChangeAsync(result).ConfigureAwait(false);
+        return await CompleteRouteChangeAsync(result, beganAt).ConfigureAwait(false);
     }
 
-    private static async Task<UiOperationResult> CompleteRouteChangeAsync(UiOperationResult result)
-    {
-        if (!result.Success) return result;
-        WinInetSettings.NotifyChanged();
-        // The network transaction has committed. Do not turn a compatibility
-        // advisory into a false "switch failed" or block the WinForms thread.
-        var compatibility = await Task.Run(() => CodexProxyCompatibility.RefreshCurrentUser(true)).ConfigureAwait(false);
-        return compatibility.Changed || compatibility.Code is not ("Ready" or "Inactive" or "CodexNotFound")
-            ? result with { Message = result.Message + " " + compatibility.Message }
-            : result;
-    }
+    private static Task<UiOperationResult> CompleteRouteChangeAsync(UiOperationResult result, DateTimeOffset beganAt) =>
+        RouteChangeAdvisory.CompleteAsync(result,
+            () => CodexClientProcesses.IsRunningInCurrentSession(beganAt),
+            WinInetSettings.NotifyChanged,
+            () => Task.Run(() => CodexProxyCompatibility.RefreshCurrentUser(true)));
 
     public Task<UiOperationResult> AcquireClientAsync(string client, CancellationToken cancellationToken) =>
         SendControlAsync("AcquireClient", "client", client, cancellationToken);
@@ -102,47 +99,9 @@ internal sealed class ServiceClient : IArtVpnUiController
         SecureString confirmation,
         CancellationToken cancellationToken)
     {
-        byte[]? firstBytes = null;
-        byte[]? secondBytes = null;
-        try
-        {
-            firstBytes = SecureStringUtf8.Copy(first);
-            secondBytes = SecureStringUtf8.Copy(confirmation);
-            await using var client = new NamedPipeClientStream(".", ProvisionPipe, PipeDirection.InOut,
-                PipeOptions.Asynchronous, TokenImpersonationLevel.Identification);
-            await client.ConnectAsync(5_000, cancellationToken).ConfigureAwait(false);
-            // P2 explicitly means Save AND connect. Old P1 clients keep their
-            // save-only semantics; an old service rejects P2 without mutation.
-            await client.WriteAsync("ARTVPNP2"u8.ToArray(), cancellationToken).ConfigureAwait(false);
-            await WriteValueAsync(client, firstBytes, cancellationToken).ConfigureAwait(false);
-            await WriteValueAsync(client, secondBytes, cancellationToken).ConfigureAwait(false);
-            await client.FlushAsync(cancellationToken).ConfigureAwait(false);
-            var response = await ReadLineAsync(client, cancellationToken).ConfigureAwait(false);
-            using var document = JsonDocument.Parse(response);
-            var root = document.RootElement;
-            var accepted = root.TryGetProperty("accepted", out var acceptedValue) && acceptedValue.GetBoolean();
-            var code = root.TryGetProperty("detailCode", out var codeValue) ? codeValue.GetString() ?? "" : "";
-            if (!accepted) return new UiOperationResult(false, Humanize(code), code);
-            if (!root.TryGetProperty("schema", out var schema) || schema.GetInt32() != 1 ||
-                !root.TryGetProperty("kind", out var kind) || kind.GetString() != "art-vpn-provider-response" ||
-                !root.TryGetProperty("secretDisplayed", out var displayed) || displayed.GetBoolean() ||
-                code != "ProviderConnectQueued" || !root.TryGetProperty("requestId", out var id) ||
-                !Guid.TryParseExact(id.GetString(), "N", out var requestId))
-                return new(false, Humanize("ControllerResultRejected"), "ControllerResultRejected");
-            // Receipt acknowledgement is not a connected route. Stay in the
-            // wizard until this exact request has a verified controller result.
-            var result = await WaitForControllerResultAsync(requestId.ToString("N"), cancellationToken).ConfigureAwait(false);
-            return await CompleteRouteChangeAsync(result).ConfigureAwait(false);
-        }
-        catch (Exception ex) when (ex is IOException or TimeoutException or OperationCanceledException or JsonException or InvalidOperationException)
-        {
-            return new UiOperationResult(false, Humanize("ServiceUnavailable"), "ServiceUnavailable");
-        }
-        finally
-        {
-            if (firstBytes is not null) CryptographicOperations.ZeroMemory(firstBytes);
-            if (secondBytes is not null) CryptographicOperations.ZeroMemory(secondBytes);
-        }
+        var beganAt = DateTimeOffset.UtcNow;
+        var result = await ProviderConnectionClient.ConnectAsync(first, confirmation, cancellationToken).ConfigureAwait(false);
+        return await CompleteRouteChangeAsync(new(result.Success, Humanize(result.DetailCode), result.DetailCode), beganAt).ConfigureAwait(false);
     }
 
     private static async Task<UiOperationResult> SendControlAsync(string action, string? argumentName,
@@ -222,17 +181,6 @@ internal sealed class ServiceClient : IArtVpnUiController
         return new UiOperationResult(false, Humanize("ControllerResultTimedOut"), "ControllerResultTimedOut");
     }
 
-    private static async Task WriteValueAsync(Stream stream, byte[] value, CancellationToken cancellationToken)
-    {
-        var length = BitConverter.GetBytes(value.Length);
-        try
-        {
-            await stream.WriteAsync(length, cancellationToken).ConfigureAwait(false);
-            await stream.WriteAsync(value, cancellationToken).ConfigureAwait(false);
-        }
-        finally { CryptographicOperations.ZeroMemory(length); }
-    }
-
     private static async Task<string> ReadLineAsync(Stream stream, CancellationToken cancellationToken)
     {
         var bytes = new List<byte>();
@@ -248,7 +196,8 @@ internal sealed class ServiceClient : IArtVpnUiController
 
     private static string Humanize(string code) => code switch
     {
-        "ExternalTunnelOwnsRoute" => "Другой VPN управляет сетью в режиме TUN. В HAPP или Throne выберите режим Proxy вместо TUN и повторите подключение. Подписка сохранена; текущая сеть не изменена. Самостоятельно отключать чужой туннель ART VPN не будет.",
+        "ExternalTunnelOwnsRoute" => "Этот TUN пока нельзя переключить автоматически. Отключите его в другом VPN и повторите. Настройки и подписка сохранены.",
+        "HappControlUnavailable" or "HappRecoveryPending" or "HappRollbackNotVerified" => "Не удалось подтвердить управление HAPP. Проверьте его подключение; настройки HAPP не сбрасывались.",
         "ExternalTunnelCheckUnavailable" => "Не удалось проверить маршруты другого VPN. Подписка сохранена; сеть не изменена. Повторите подключение после проверки режима другого VPN.",
         "ProviderConnectedAuto" => "ART VPN подключён. Режим «Авто» включён. Если открытый Codex ещё не отвечает, закройте и снова откройте его: прежние соединения могут оставаться на другом VPN.",
         "ProvisionProtocolRejected" => "Служба ART VPN устарела. Обновите установку, чтобы сохранять подписку и подключаться одним действием.",
@@ -278,6 +227,7 @@ internal sealed class ServiceClient : IArtVpnUiController
         "SubscriptionRefreshPausedByManualRoute" => "Выбран внешний VPN. Фоновая проверка ART VPN приостановлена до включения Auto или ART VPN.",
         "ExternalRoutePreservedAfterFailedSwitch" => "Во время проверки подключение изменилось вне ART VPN. Ваш новый маршрут сохранён.",
         "RouteSwitchNeedsReconciliation" => "Переключение требует проверки состояния. ART VPN не будет принудительно возвращать свой маршрут.",
+        "HappRollbackRouteUnconfirmed" => "HAPP включён обратно, но связь пока не подтверждена. Откройте диагностику или проверьте подключение в HAPP.",
         "SystemProxyEnabled" => "Windows подключена к стабильному входу ART VPN. Российские сайты, Avito и Ozon идут напрямую.",
         "SystemProxyAlreadyEnabled" => "Windows уже использует стабильный вход ART VPN.",
         "SystemProxyRestored" => "Прежняя настройка подключения Windows восстановлена точно.",

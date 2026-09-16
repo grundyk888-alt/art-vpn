@@ -12,6 +12,23 @@ internal static class Program
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
 
+        if (args.Length == 1 && args[0] == "--apply-update")
+        {
+            try { return UpdateDownloadLink.RunWorker(); }
+            catch
+            {
+                MessageBox.Show("Обновление не запущено: не удалось подтвердить установленную версию. VPN не изменён.",
+                    "ART VPN", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return 1;
+            }
+        }
+        if (args.Length == 2 && args[0] == "--update-transfer-test")
+        {
+            var result = UpdatePackageTransferTests.RunAsync().GetAwaiter().GetResult();
+            File.WriteAllText(args[1], System.Text.Json.JsonSerializer.Serialize(result));
+            return 0;
+        }
+
         if (args.Length == 3 && args[0] == "--qa")
             return UiQaHarness.Run(args[1], args[2]);
 
@@ -30,6 +47,7 @@ internal static class Program
         }
 
         if (args.Length > 1 || (args.Length == 1 && args[0] != "--start-in-tray")) return 25;
+        UpdateDownloadLink.CleanupCompleted();
         using var mutex = new Mutex(false, MutexName);
         var owns = false;
         try

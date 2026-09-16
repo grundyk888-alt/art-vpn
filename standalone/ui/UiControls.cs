@@ -6,12 +6,12 @@ namespace ArtSport.ArtVpn.Ui;
 internal static class Palette
 {
     public static readonly Color Canvas = Color.FromArgb(244, 247, 251);
-    public static readonly Color Ink = Color.FromArgb(23, 35, 52);
+    public static readonly Color Ink = Color.FromArgb(25, 43, 64);
     public static readonly Color Muted = Color.FromArgb(94, 108, 126);
-    public static readonly Color Blue = Color.FromArgb(39, 105, 218);
-    public static readonly Color BlueSoft = Color.FromArgb(232, 240, 255);
+    public static readonly Color Blue = Color.FromArgb(50, 98, 167);
+    public static readonly Color BlueSoft = Color.FromArgb(235, 241, 249);
     public static readonly Color Green = Color.FromArgb(19, 137, 91);
-    public static readonly Color GreenSoft = Color.FromArgb(230, 248, 239);
+    public static readonly Color GreenSoft = Color.FromArgb(237, 246, 241);
     public static readonly Color Amber = Color.FromArgb(181, 115, 17);
     public static readonly Color AmberSoft = Color.FromArgb(255, 245, 222);
     public static readonly Color Red = Color.FromArgb(190, 58, 66);
@@ -22,7 +22,7 @@ internal static class Palette
 internal sealed class RoundedPanel : Panel
 {
     [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
-    internal int Radius { get; set; } = 18;
+    internal int Radius { get; set; } = 12;
     [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
     internal Color BorderColor { get; set; } = Palette.Border;
     [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
@@ -41,7 +41,7 @@ internal sealed class RoundedPanel : Panel
         base.OnPaint(e);
         var rectangle = new Rectangle(0, 0, Width - 1, Height - 1);
         using var path = Rounded(rectangle, Radius);
-        using var brush = new SolidBrush(BackColor);
+        using var brush = new LinearGradientBrush(rectangle, BackColor, ControlPaint.Light(BackColor, 0.06f), 35f);
         using var pen = new Pen(BorderColor, BorderWidth);
         e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
         e.Graphics.FillPath(brush, path);
@@ -53,10 +53,12 @@ internal sealed class RoundedPanel : Panel
         base.OnResize(e);
         if (Width < 2 || Height < 2) return;
         using var path = Rounded(new Rectangle(0, 0, Width, Height), Radius);
+        var oldRegion = Region;
         Region = new Region(path);
+        oldRegion?.Dispose();
     }
 
-    private static GraphicsPath Rounded(Rectangle bounds, int radius)
+    internal static GraphicsPath Rounded(Rectangle bounds, int radius)
     {
         var diameter = Math.Max(2, radius * 2);
         var path = new GraphicsPath();
@@ -66,6 +68,19 @@ internal sealed class RoundedPanel : Panel
         path.AddArc(bounds.Left, bounds.Bottom - diameter, diameter, diameter, 90, 90);
         path.CloseFigure();
         return path;
+    }
+}
+
+internal sealed class RoundedButton : Button
+{
+    protected override void OnResize(EventArgs e)
+    {
+        base.OnResize(e);
+        if (Width < 2 || Height < 2) return;
+        using var path = RoundedPanel.Rounded(new Rectangle(0, 0, Width, Height), Math.Max(4, 8 * DeviceDpi / 96));
+        var old = Region;
+        Region = new Region(path);
+        old?.Dispose();
     }
 }
 
@@ -81,7 +96,7 @@ internal static class UiFactory
         UseCompatibleTextRendering = false
     };
 
-    public static Button Button(string name, string text, bool primary = false, int width = 160) => new Button
+    public static Button Button(string name, string text, bool primary = false, int width = 160) => new RoundedButton
     {
         Name = name,
         Text = text,
@@ -101,6 +116,13 @@ internal static class UiFactory
     {
         button.FlatAppearance.BorderColor = color;
         button.FlatAppearance.BorderSize = 1;
+        button.MouseEnter += (_, _) =>
+        {
+            // Selected route buttons change colour after status refresh.
+            var selected = button.BackColor == Palette.Blue;
+            button.FlatAppearance.MouseOverBackColor = selected ? Color.FromArgb(40, 80, 137) : Palette.BlueSoft;
+            button.FlatAppearance.MouseDownBackColor = selected ? Color.FromArgb(34, 69, 119) : Color.FromArgb(220, 230, 243);
+        };
         return button;
     }
 }

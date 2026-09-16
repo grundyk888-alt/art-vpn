@@ -33,7 +33,8 @@ internal sealed record VpnViewState(
     string ActiveChannel = "Не подтверждён",
     bool ActiveChannelVerified = false);
 
-internal sealed record UiOperationResult(bool Success, string Message, string IncidentCode = "");
+internal sealed record UiOperationResult(bool Success, string Message, string IncidentCode = "",
+    bool CodexRestartSuggested = false);
 
 internal interface IArtVpnUiController
 {
@@ -64,6 +65,6 @@ internal sealed class ProductionSetupLauncher : ISetupLauncher
         using var wizard = new FirstRunWizard(controller);
         wizard.ShowDialog(owner);
         if (wizard.DialogResult == DialogResult.OK && owner is MainForm main)
-            main.ShowSetupCompletion(wizard.CompletedMessage);
+            main.ShowSetupCompletion(wizard.CompletedMessage, wizard.CompletedCodexRestartSuggested);
     }
 }

@@ -102,6 +102,7 @@ internal sealed class FirstRunWizard : Form
 
     internal int CurrentPage => _page;
     internal string CompletedMessage { get; private set; } = "";
+    internal bool CompletedCodexRestartSuggested { get; private set; }
 
     private Control WelcomePage()
     {
@@ -536,6 +537,7 @@ internal sealed class FirstRunWizard : Form
             {
                 // This result now means Windows is connected, not just saved.
                 CompletedMessage = result.Message;
+                CompletedCodexRestartSuggested = result.CodexRestartSuggested;
                 DialogResult = DialogResult.OK;
                 Close();
             }

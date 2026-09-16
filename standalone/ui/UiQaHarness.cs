@@ -161,10 +161,13 @@ internal static class UiQaHarness
         var controller = new QaController();
         var setup = new QaSetupLauncher();
         var recommendations = new List<string>();
+        var codexRestartNotices = new List<string>();
 
         var discovery = ClientDiscoveryTests.Run();
         var routeHealthChecks = RouteHealthPresentationTests.Verify();
         var codexStatusReadOnlyChecks = CodexStatusReadOnlyTests.Verify();
+        var codexRestartPolicyChecks = RouteChangeAdvisoryTests.VerifyAsync().GetAwaiter().GetResult();
+        var codexRestartUiChecks = 0;
         var clientDiscoveryUiChecks = 0;
         try { clientDiscoveryUiChecks = VerifyClientDiscoveryUi(); }
         catch (Exception error) { failures.Add("ClientDiscoveryUi: " + error.Message); }
@@ -176,7 +179,8 @@ internal static class UiQaHarness
         catch (Exception error) { failures.Add("ClientInstallationLifetime: " + error.Message); }
         StatusText.VerifyContract();
         var controlReplyChecks = ArtSport.Vpn.Shared.ControlReplyPolicy.VerifyContract();
-        using var form = new MainForm(controller, setup, recommendations.Add);
+        using var form = new MainForm(controller, setup, recommendations.Add,
+            (_, message) => codexRestartNotices.Add(message));
         try
         {
             form.StartPosition = FormStartPosition.Manual;
@@ -253,13 +257,28 @@ internal static class UiQaHarness
             var headerHelp = Descendants(form).Single(item => item.Name == "HelpButton");
             Assert(!headerRecommendation.Bounds.IntersectsWith(headerHelp.Bounds),
                 "Quattro header overlaps Help at the minimum window size.", failures);
+            var compactConnection = Descendants(form).Single(item => item.Name == "ConnectionCard");
+            foreach (Control child in compactConnection.Controls)
+                Assert(compactConnection.ClientRectangle.Contains(child.Bounds), "Connection card clips data at minimum size: " + child.Name, failures);
+            var compactCountry = Descendants(form).OfType<Label>().Single(item => item.Name == "CurrentCountry");
+            var originalCountryText = compactCountry.Text;
+            compactCountry.Text = "Очень длинное название страны и канала для проверки границ интерфейса";
+            Assert(compactCountry.AutoEllipsis && !compactCountry.AutoSize && compactConnection.ClientRectangle.Contains(compactCountry.Bounds) &&
+                compactCountry.Text.EndsWith("интерфейса", StringComparison.Ordinal), "Long country name lost or overlaps metrics.", failures);
+            compactCountry.Text = originalCountryText;
+            var compactScroll = Descendants(form).OfType<FlowLayoutPanel>().Single(item => item.Name == "MainScroll");
+            Assert(!compactScroll.HorizontalScroll.Visible, "Unexpected horizontal scrolling in minimum window. " +
+                JsonSerializer.Serialize(new { client = compactScroll.ClientSize.ToString(), display = compactScroll.DisplayRectangle.ToString(),
+                    cards = compactScroll.Controls.Cast<Control>().Select(c => new { c.Name, bounds = c.Bounds.ToString(), preferred = c.PreferredSize.ToString() }) }), failures);
             SaveRender(form, screenshotPath, "ARTVpn.UI.MinimumQA.png");
             form.Size = originalSize;
             Application.DoEvents();
             var buttons = Descendants(form).OfType<Button>().ToArray();
-            var routeLabel = Descendants(form).OfType<Label>().Single(item => item.Name == "CodexRouteStatus");
-            Assert(routeLabel.Text.Contains("системному прокси", StringComparison.Ordinal),
-                "Codex automatic route status is absent.", failures);
+            Assert(!Descendants(form).Any(item => item.Name is "CodexRouteCard" or "CodexRouteStatus"),
+                "Removed Codex information panel remains on the main screen.", failures);
+            var mainScroll = Descendants(form).OfType<FlowLayoutPanel>().Single(item => item.Name == "MainScroll");
+            Assert(mainScroll.Controls.Count == 5 && mainScroll.FlowDirection == FlowDirection.TopDown,
+                "Main card flow left a placeholder after panel removal.", failures);
             var windowsRoute = Descendants(form).OfType<Label>().Single(item => item.Name == "WindowsRouteStatus");
             Assert(windowsRoute.Text.Contains("22080", StringComparison.Ordinal), "Actual Windows route is absent.", failures);
             controller.Route = WindowsRouteStatus.Describe(1, "127.0.0.1:2080", "");
@@ -377,6 +396,37 @@ internal static class UiQaHarness
                 "Unexpected controller failure crashed the handler or left controls locked.", failures);
             ClickAndWait(form, controller, "CheckNowButton", "CheckNow");
 
+            // HAPP -> Auto (and any confirmed route command): the advisory
+            // is explicit, one-off, and independent of status-footer polling.
+            var noticesBefore = codexRestartNotices.Count;
+            controller.NextResult = new(true, "Выбранный маршрут проверен.", "SelectedRouteVerified", true);
+            var autoAction = form.Tray.ContextMenuStrip.Items.OfType<ToolStripMenuItem>()
+                .Single(item => item.Name == "TrayModeAuto");
+            autoAction.PerformClick();
+            Wait(() => !form.IsBusy && codexRestartNotices.Count > noticesBefore);
+            Assert(codexRestartNotices.Count == noticesBefore + 1 &&
+                   codexRestartNotices.Last().Contains("полностью закройте", StringComparison.OrdinalIgnoreCase) &&
+                   codexRestartNotices.Last().Contains("VPN выключать не нужно", StringComparison.Ordinal),
+                "Confirmed Auto switch did not show the explicit Codex restart notice exactly once.", failures);
+            codexRestartUiChecks++;
+            routeRefresh = form.RefreshStatusAsync();
+            Wait(() => routeRefresh.IsCompleted && !form.IsBusy);
+            Assert(codexRestartNotices.Count == noticesBefore + 1,
+                "A status poll reopened the Codex restart dialog.", failures);
+            codexRestartUiChecks++;
+            controller.NextResult = new(false, "Переключение не подтверждено.", "UnknownOutcome", true);
+            autoAction.PerformClick();
+            Wait(() => !form.IsBusy);
+            Assert(codexRestartNotices.Count == noticesBefore + 1,
+                "A failed route command displayed a success-dependent restart notice.", failures);
+            codexRestartUiChecks++;
+            controller.NextResult = new(true, "Выбранный маршрут проверен.");
+            autoAction.PerformClick();
+            Wait(() => !form.IsBusy);
+            Assert(codexRestartNotices.Count == noticesBefore + 1,
+                "An ordinary route result without an old Codex process requested a restart.", failures);
+            codexRestartUiChecks++;
+
             Click(form, "HelpButton");
             Wait(() => Application.OpenForms.OfType<HelpDialog>().Any());
             var help = Application.OpenForms.OfType<HelpDialog>().Single();
@@ -396,6 +446,14 @@ internal static class UiQaHarness
                    helpText.Contains("Вернуть прежнее", StringComparison.Ordinal) &&
                    helpText.Contains("до двух резервов", StringComparison.Ordinal),
                 "Help does not explain explicit activation, rollback, or bounded reserve availability.", failures);
+            Assert(helpText.Contains("Основной канал — ART VPN", StringComparison.Ordinal) &&
+                   helpText.Contains("не требуется автозапуск HAPP", StringComparison.Ordinal) &&
+                   helpText.Contains("а не выбирает HAPP", StringComparison.Ordinal),
+                "Help must distinguish ART-first, optional reserve and restoring old network settings.", failures);
+            Assert(helpText.Contains("в первом окне установки", StringComparison.Ordinal) &&
+                   helpText.Contains("подключится автоматически", StringComparison.Ordinal) &&
+                   !helpText.Contains("Интернет пока не переключается", StringComparison.Ordinal),
+                "Help still describes the obsolete separate activation after first connection.", failures);
             help.Close();
 
             Click(form, "DiagnosticsButton");
@@ -560,11 +618,20 @@ internal static class UiQaHarness
             Assert(wizard.Visible && operationMessage.Text.Contains("Канал недоступен"),
                 "Connection failure disappeared instead of showing a recovery step.", failures);
             first.Text = "https://example.invalid/test-provider-value";
+            controller.NextResult = new(true, "ART VPN подключён. Режим «Авто» включён.", "ProviderConnectedAuto", true);
             next.PerformClick();
             Wait(() => wizard.IsDisposed || !wizard.Visible);
             Assert(controller.Calls.Contains("ConfigureProvider"), "Wizard did not invoke protected provider handoff.", failures);
             Assert(first.IsDisposed || first.Text.Length == 0, "Wizard retained provider text after handoff.", failures);
             Assert(wizard.CompletedMessage.Contains("Авто"), "Wizard does not preserve the confirmed connection result.", failures);
+            Assert(wizard.CompletedCodexRestartSuggested, "Wizard dropped the Codex restart notice after first connection.", failures);
+            codexRestartUiChecks++;
+            noticesBefore = codexRestartNotices.Count;
+            form.ShowSetupCompletion(wizard.CompletedMessage, wizard.CompletedCodexRestartSuggested);
+            Wait(() => !form.IsBusy && codexRestartNotices.Count > noticesBefore);
+            Assert(codexRestartNotices.Count == noticesBefore + 1,
+                "Setup completion did not display exactly one restart notice.", failures);
+            codexRestartUiChecks++;
 
             using (var closingWizard = new FirstRunWizard(controller))
             {
@@ -602,6 +669,9 @@ internal static class UiQaHarness
             modeControlsChecks = 8,
             freshRouteHealthChecks = routeHealthChecks,
             codexStatusReadOnlyChecks,
+            codexRestartPolicyChecks,
+            codexRestartUiChecks,
+            codexRestartNoticeDelivery = "injected dialog callback; no actual Codex restart or native modal acceptance",
             recommendationClicks = recommendations.Count,
             recommendationNavigation = "injected browser callback; no browser or network opened",
             wizardFailureChecks = 4,
@@ -707,6 +777,9 @@ internal static class UiQaHarness
     private static void CheckRecommendationBounds(Control root, string name, List<string> failures)
     {
         var card = Descendants(root).Single(item => item.Name == name);
+        Assert(Descendants(card).Any(item => item.Text == ArtSport.ArtVpn.Common.QuattroRecommendation.BenefitText) &&
+               !Descendants(card).Any(item => (item.Text + item.AccessibleDescription).Contains("рефераль", StringComparison.OrdinalIgnoreCase)),
+            name + ": recommendation copy differs from the shared product text.", failures);
         foreach (var child in Descendants(card))
             Assert(child.Left >= 0 && child.Top >= 0 && child.Right <= child.Parent!.ClientSize.Width &&
                    child.Bottom <= child.Parent.ClientSize.Height,

@@ -1,34 +1,78 @@
 using System.Diagnostics;
 using System.Text.Json;
-using System.Text.RegularExpressions;
+using System.Security.Cryptography;
 
 namespace ArtSport.ArtVpn.Ui;
 
 internal static class UpdateDownloadLink
 {
+    internal const string InstallRoot = @"C:\Program Files\ART VPN";
+    internal const string StateRoot = @"C:\ProgramData\ART VPN\state";
+    internal static string CacheRoot => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ART VPN", "updates");
+
     public static void Offer(IWin32Window owner)
     {
         try
         {
-            // Receipt is produced by the protected service after RSA-PSS verification.
-            using var json = JsonDocument.Parse(File.ReadAllText(@"C:\ProgramData\ART VPN\state\update-check.v1.json"));
-            var root = json.RootElement;
-            if (root.GetProperty("status").GetString() != "Available" ||
-                !DateTimeOffset.TryParse(root.GetProperty("checkedAtUtc").GetString(), out var checkedAt) ||
-                DateTimeOffset.UtcNow - checkedAt > TimeSpan.FromHours(1) || checkedAt > DateTimeOffset.UtcNow.AddMinutes(5)) return;
-            if (!Uri.TryCreate(root.GetProperty("packageUri").GetString(), UriKind.Absolute, out var uri) ||
-                uri.Scheme != "https" || !uri.IsDefaultPort || uri.Host != "drive.google.com" ||
-                uri.UserInfo.Length != 0 || !Regex.IsMatch(uri.AbsolutePath, "^/file/d/[A-Za-z0-9_-]{15,}/view$"))
-                throw new InvalidDataException();
-            var version = root.GetProperty("availableVersion").GetString();
-            if (MessageBox.Show(owner, "Доступна версия " + version + ".\n\nОткрыть проверенную ссылку на ZIP в Google Диске?\nПосле скачивания запустите установщик — подписка и настройки сохранятся.\n\nУстановку лучше выполнять после завершения удалённой работы: обновление фоновой службы может потребовать переподключения.",
-                    "Обновление ART VPN", MessageBoxButtons.YesNo, MessageBoxIcon.Information) == DialogResult.Yes)
-                Process.Start(new ProcessStartInfo(uri.AbsoluteUri) { UseShellExecute = true });
+            // A copy outside InstallRoot survives replacement of the old UI and
+            // retains the user's normal token to reopen the new UI unelevated.
+            var directory = Path.Combine(CacheRoot, Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(directory);
+            RejectReparse(directory);
+            var worker = Path.Combine(directory, "ARTVpn.Update.exe");
+            File.Copy(Path.Combine(InstallRoot, "runtime", "ARTVpn.UI.exe"), worker, false);
+            using var started = Process.Start(new ProcessStartInfo(worker) { UseShellExecute = false, ArgumentList = { "--apply-update" } });
+            if (started is null) throw new IOException();
         }
         catch
         {
-            MessageBox.Show(owner, "Ссылка обновления не подтверждена. Повторите проверку позже; действующий VPN не изменён.",
+            MessageBox.Show(owner, "Не удалось запустить обновление. Текущий VPN не изменён.",
                 "ART VPN", MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
+    }
+
+    internal static void RejectReparse(string directory)
+    {
+        for (var item = new DirectoryInfo(directory); item is not null; item = item.Parent)
+            if ((item.Attributes & FileAttributes.ReparsePoint) != 0) throw new IOException("UpdateReparseRejected");
+    }
+
+    internal static int RunWorker()
+    {
+        var directory = Path.GetDirectoryName(Environment.ProcessPath!)!;
+        if (!string.Equals(Path.GetDirectoryName(directory), CacheRoot, StringComparison.OrdinalIgnoreCase) ||
+            !Guid.TryParseExact(Path.GetFileName(directory), "N", out _)) return 25;
+        RejectReparse(directory);
+        using var manifest = JsonDocument.Parse(File.ReadAllText(Path.Combine(InstallRoot, "manifest.v1.json")));
+        var expected = manifest.RootElement.GetProperty("files").EnumerateArray()
+            .Single(f => f.GetProperty("path").GetString() == "runtime/ARTVpn.UI.exe").GetProperty("sha256").GetString();
+        using (var self = File.OpenRead(Environment.ProcessPath!))
+            if (Convert.ToHexString(SHA256.HashData(self)) != expected) return 25;
+        using var mutex = new Mutex(false, @"Local\ARTSPORT.ARTVpn.Update.v1");
+        bool owns;
+        try { owns = mutex.WaitOne(0); } catch (AbandonedMutexException) { owns = true; }
+        if (!owns) return 24;
+        try { using var form = new ProductUpdateForm(directory); Application.Run(form); return form.Succeeded ? 0 : 1; }
+        finally { mutex.ReleaseMutex(); }
+    }
+
+    internal static void CleanupCompleted()
+    {
+        if (!Directory.Exists(CacheRoot)) return;
+        try
+        {
+            RejectReparse(CacheRoot);
+            foreach (var directory in Directory.EnumerateDirectories(CacheRoot))
+            {
+                if (!Guid.TryParseExact(Path.GetFileName(directory), "N", out _) || !File.Exists(Path.Combine(directory, "completed"))) continue;
+                RejectReparse(directory);
+                // Remove only this updater's exact files; retain unknown data.
+                foreach (var name in new[] { "package.zip", "ART-VPN-Setup.exe", "ARTVpn.Update.exe" })
+                    UpdatePackageTransfer.TryDelete(Path.Combine(directory, name));
+                if (Directory.GetFiles(directory).Select(Path.GetFileName).SequenceEqual(new[] { "completed" }))
+                { File.Delete(Path.Combine(directory, "completed")); Directory.Delete(directory); }
+            }
+        }
+        catch (IOException) { } catch (UnauthorizedAccessException) { }
     }
 }
