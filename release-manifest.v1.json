@@ -1,0 +1,112 @@
+{
+  "schema": 1,
+  "kind": "art-vpn-consumer-package",
+  "product": "ART VPN",
+  "version": "1.0.40",
+  "minimumWindowsBuild": 17763,
+  "files": [
+    {
+      "path": "legal/ARTVpnCore-corresponding-source.zip",
+      "bytes": 2698287,
+      "sha256": "9D86362C372BD638876AA47BE68F793FE302889ECBCD29DB24CB3B74CE97D9CB",
+      "role": "legal"
+    },
+    {
+      "path": "legal/ARTVpnCore.LICENSE.txt",
+      "bytes": 808,
+      "sha256": "BB3805862B583AEE73AD6F7805EC634747A37257A637A3069857843F05EA589C",
+      "role": "legal"
+    },
+    {
+      "path": "legal/ARTVpnCore.provenance.json",
+      "bytes": 769,
+      "sha256": "DAE5244299EEF4AAE4FB73894AA94CD2F425DED5AAE2B18E53A1EF5AA32CEE3B",
+      "role": "legal"
+    },
+    {
+      "path": "legal/ARTVpnCore.sbom.cdx.json",
+      "bytes": 27019,
+      "sha256": "3B96D71A8D8C8BE0D433860B0D5D228C0147E8DD8E1EC61CDBEA3CAFD4929C8C",
+      "role": "legal"
+    },
+    {
+      "path": "legal/SING-BOX-LICENSE.txt",
+      "bytes": 792,
+      "sha256": "7C2D3351413C756599287E734DA2791BA75A66F3D0333F9091A7B3DB581A591B",
+      "role": "legal"
+    },
+    {
+      "path": "legal/THRONE-LICENSE.txt",
+      "bytes": 35150,
+      "sha256": "E57F1C320B8CF8798A7D2FF83A6F9E06A33A03585F6E065FEA97F1D86DB84052",
+      "role": "legal"
+    },
+    {
+      "path": "README-RU.txt",
+      "bytes": 9500,
+      "sha256": "868AFA3AA7C92C74CCC0AF94D900AE473CB2CCDC4DD0CB7A7ACCDB952DE47915",
+      "role": "documentation"
+    },
+    {
+      "path": "runtime/ARTVpn.Maintenance.exe",
+      "bytes": 51991519,
+      "sha256": "F98E6DEC494B7CBAB8F7CAB6199FD199294812AFF341C75F5A85C4AF3339AD0B",
+      "role": "maintenance"
+    },
+    {
+      "path": "runtime/ARTVpn.Service.exe",
+      "bytes": 38155249,
+      "sha256": "11BCB2465FE10875362CB54AEC01867E34591DCBC111B770BB9B5F90F0D273C0",
+      "role": "service"
+    },
+    {
+      "path": "runtime/ARTVpn.UI.exe",
+      "bytes": 52093075,
+      "sha256": "A4A36A527A1D52F5CAE785B3CC17154E154A6DF682371BA02CCC40F30685B972",
+      "role": "ui"
+    },
+    {
+      "path": "runtime/ARTVpnCore.exe",
+      "bytes": 81978368,
+      "sha256": "BF0866CCD7508755E64A12E54EF653729947F3CEE95F96450B2E5411577AAD61",
+      "role": "core"
+    },
+    {
+      "path": "runtime/rules/geoip-ru-8E2EA5596030.srs",
+      "bytes": 106188,
+      "sha256": "8E2EA55960301382FD9DFD3C3311E386C28CDCD1EF0DBBB9D83778D01316EE1F",
+      "role": "rule"
+    },
+    {
+      "path": "runtime/rules/geosite-category-ru-E229BA087FD3.srs",
+      "bytes": 7866,
+      "sha256": "E229BA087FD310F30EB16EAE6426C858733F2070C7393E59F50E80CA0B0992BE",
+      "role": "rule"
+    },
+    {
+      "path": "runtime/rules/geosite-ru-2CDA8DB80483.srs",
+      "bytes": 14425,
+      "sha256": "2CDA8DB804832D825780D9F89BBD2F8B95D5E7EF802FD19EB83C61CDB2B655C8",
+      "role": "rule"
+    },
+    {
+      "path": "runtime/rules/geosite-ru-available-only-inside-D6BA57D47D19.srs",
+      "bytes": 1281,
+      "sha256": "D6BA57D47D190897A9F4445FD2D19E180DE1D97322BA2AB60C16AF6E05B49202",
+      "role": "rule"
+    },
+    {
+      "path": "runtime/rules/manifest.json",
+      "bytes": 1823,
+      "sha256": "229479AEAD5FCBAE431D1252D36F8C6E87F70AB5211AAE8A6B5E5275D186EB24",
+      "role": "rule"
+    },
+    {
+      "path": "runtime/update/channel.v1.json",
+      "bytes": 893,
+      "sha256": "57469690B1972D20E4D760193A36E471184AE8B283C8B765A52F45F72BAF9B42",
+      "role": "documentation"
+    }
+  ],
+  "containsProviderSecret": false
+}

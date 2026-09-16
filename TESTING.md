@@ -1,29 +1,34 @@
-# Candidate 1.0.19 acceptance notes — 2026-09-15
+# Release 1.0.40 checks — 2026-09-16
 
 These are bounded engineering checks, not an independent certification or a
 promise of uninterrupted connectivity under every provider/OS/network condition.
 
-Tested in an isolated Windows 10 VM using the frozen candidate:
+The 1.0.40 change removes subscription-discovery UI, implementation and tests;
+negative UI regression checks verify that those controls are absent. No routing
+or channel-selector logic was rewritten for this release.
 
-- Install, repeat-install/idempotence, registered uninstall and reinstall.
-- Fresh subscription provisioning through the product UI event path; automatic
-  connection after a valid subscription; invalid-subscription rejection.
-- Unavailable external HAPP proxy rejected without discarding the working route.
-- Owned core-process failure recovery (about 6 seconds) and service restart
-  recovery (about 8 seconds) in that test environment.
-- Subscription refresh with 92/92 continuity probes successful while refreshing;
-  fresh final requests confirmed after activation. Some intermediate probes reused
-  HTTP connections; they are not proof of 92 distinct newly established sessions.
-- Real bypass-rule downloads to a verified candidate; active rules/configuration
-  preserved until normal generation qualification.
-- Unavailable update feed produces a bounded error without breaking routing.
-  This is **not** a working automatic product-update acceptance result.
+Release-operator checks in a disposable Windows 10 VM passed:
 
-Programmatic UI/event tests are not equivalent to native mouse interaction or
-successful signed-in Codex usage. Authenticated Codex/Office flows, native Codex
-updates, remote-session continuity, a complete third-party TUN takeover and reboot
-acceptance of this exact frozen candidate remain outside those passed checks.
+- 18 service regression families, 182 installer checks and 27 update-transfer cases.
+- Main UI, four scaling configurations and two compact layouts.
+- 17 embedded payload files; the VM system proxy remained unchanged during fixtures.
+- A clean build of the complete installer from the separately published source.
+- Public ZIP download and SHA-256 equality, including the installer inside it.
 
-Private VM logs, account details, subscription URLs and credentials are not
-published here. CI receipts are separate fresh fixture results from public source.
-Never re-label an old receipt as proof of a newly built/signed installer.
+An earlier isolated `scenario:busy` run timed out after 180 seconds. A full rerun
+of the same binaries passed. Its intermittent cause remains unknown: do not call
+this a proven runtime fix or discard the earlier failure.
+
+Prior 1.0.36/1.0.38 acceptance separately exercised installation with HAPP TUN,
+manual HAPP/ART round trips, return to HAPP on uninstall, external fallback and
+upgrade preserving settings. These are dated earlier-version checks, not a fresh
+installation/reboot/authenticated Codex test of 1.0.40. The release was approved
+after user testing, but no claim of every possible environment is made.
+
+GitHub Actions builds components and runs 14 groups of bounded fixture entry
+points from the current commit. CI does not install a VPN, use live subscriptions,
+change the runner network, sign a release or demonstrate an authenticated Codex
+conversation. Look at the actual run result for the relevant commit.
+
+Private VM logs, account details and subscriptions are not published. Never
+re-label an old receipt as proof of a newly built or signed installer.

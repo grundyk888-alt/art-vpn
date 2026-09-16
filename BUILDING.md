@@ -1,37 +1,36 @@
-# Building the reviewed source snapshot
+# ART VPN 1.0, internal build 1.0.40
 
-Use Windows x64, PowerShell 7 and .NET SDK 10.0.400 (or its latest patch).
-The source does not need administrator privileges to compile. Use a fresh output
-directory on a drive with sufficient space; the script never deletes an existing
-output directory and does not install/start the service or change system routing.
+This archive contains the exact C# compiler inputs and corresponding core source
+for the standalone 1.0.40 release. `source-inputs.json` records the C# file hashes.
+It contains no subscriptions, private signing keys, deployment credentials or Git history.
+GitHub source follows the same release inputs; public documentation is maintained separately.
 
-```powershell
-pwsh -File ./build/Build-Source.ps1 -OutputRoot D:/ARTVPN-Build/source-check-001
-```
+Use Windows x64, PowerShell 7, .NET SDK 10.0.400 and Go 1.25.5. Build as an ordinary
+user; neither command installs services or switches the computer's connection.
+Use a fresh output directory on a drive with sufficient space.
 
-This compiles the service, UI and maintenance/setup shell and runs isolated
-regression fixtures. **The setup shell has no embedded installation payload.**
-Do not publish these component binaries as a complete consumer installer.
-The original internal packaging scripts were intentionally not copied: they
-depended on private build paths and previous candidate payloads. A fully portable
-installer packaging/signing workflow is still being prepared.
+1. Run `./build/Build-Core.ps1 -OutputRoot D:/ARTVPN-Build/core-140`.
+   The exact corresponding source and licenses are in `third_party/core`.
+   The script checks the source and resulting core hashes.
+2. Run `./build/Build-Package.ps1 -OutputRoot D:/ARTVPN-Build/package-140 -CoreBinary <path-to-built-ARTVpnCore.exe>`.
+   This builds the service, UI, maintenance shell and complete embedded-payload
+   installer from the supplied source and payload template. It does not download
+   a previous ART VPN installer or require private build directories.
 
-The core's exact corresponding source is included in
-`third_party/core/ARTVpnCore-corresponding-source.zip`, together with a source
-manifest, provenance, dependency SBOM and original license notices. It is a
-modified Throne/sing-box snapshot, not an unmodified upstream release.
+The resulting installer is unsigned. Build paths, SDK patch and generated metadata
+can affect .NET binary hashes; no byte-identical .NET installer claim is made.
+The release manifest records the published binaries, not hashes of a future local build.
+The public update-channel key verifies ARTSPORT releases; it is not a signing key
+and cannot authorize a modified build. No Windows publisher certificate is supplied.
 
-```powershell
-# Install Go 1.25.5 for Windows amd64 first.
-pwsh -File ./build/Build-Core.ps1 -OutputRoot D:/ARTVPN-Build/core-001
-```
+The consumer ZIP deliberately contains only setup, instructions and checksums.
+Corresponding source is offered separately next to the download, under GPL-3.0.
+Individual bundled components retain their notices in `payload-template/legal`.
 
-The core script checks the archive hash, uses the archive's build tags and
-verifies the resulting binary against the recorded hash. Dependencies are
-resolved through Go's module checksum mechanism. No service is installed.
-If the exact hash does not match, stop: do not bypass the runtime verifier.
+Release checks: isolated service/installer/UI fixtures are recorded by the release
+operator. They are not proof of every real provider, every reboot or an authenticated
+Codex conversation. Test runtime operations on a disposable Windows VM first.
 
-GitHub Actions builds/checks the .NET source on a GitHub-hosted Windows runner.
-It does not publish a release, install on a user's machine, submit signing
-requests or prove authenticated Codex/Office connectivity. There are no signing
-keys, subscriptions or private deployment credentials in this repository.
+For component builds and bounded fixtures only, run `./build/Build-Source.ps1`
+with `-OutputRoot <fresh-directory>`. This is also the GitHub Actions check; it
+does not produce the complete consumer installer or install a VPN.
