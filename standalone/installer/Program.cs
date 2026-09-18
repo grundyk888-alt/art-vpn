@@ -25,6 +25,11 @@ internal static class Program
         Application.SetCompatibleTextRenderingDefault(false);
         try
         {
+            if (args.Length == 2 && args[0] == "--uninstall-route-test")
+            {
+                AtomicJson.Replace(args[1], await UninstallRouteReturnTests.RunAsync());
+                return 0;
+            }
             if (args.Length == 2 && args[0] == "--setup-connection-test")
             {
                 AtomicJson.Replace(args[1], new { status = "Passed", checks = SetupConnectionTests.Run(phase =>
@@ -1305,24 +1310,28 @@ internal static class UninstallTransaction
         RemovalPayloadVerifier.VerifyTree(@"C:\ProgramData\ART VPN Maintenance");
         ValidateServiceOwnership();
         StopOwnedUi();
-        await UninstallRouteReturn.RestoreAsync(DataRoot, state.OwnerSid, cancellationToken).ConfigureAwait(false);
+        _ = await UninstallRouteReturn.TryNativeReturnAsync(DataRoot, state.OwnerSid, cancellationToken).ConfigureAwait(false);
         var leasePath = Path.Combine(DataRoot, "state", "system-proxy-lease.v1.json");
-        var proxyRestore = SystemProxyLeaseCoordinator.Restore(
-            leasePath, state.OwnerSid, new RegistrySystemProxyStore(state.OwnerSid), dropExternalLease: false,
-            restoreOwnedEndpointWithChangedBypass: true);
-        if (proxyRestore.Status != "Completed") throw new InvalidOperationException(proxyRestore.DetailCode);
-        if (proxyRestore.DetailCode == "SystemProxyExternalOwnerPreserved")
-        {
-            var ownerStore = new RegistrySystemProxyStore(state.OwnerSid);
-            if (SystemProxyLeaseCoordinator.IsArtVpnEndpoint(ownerStore.Read()))
-                throw new InvalidOperationException("SystemProxyOwnershipRequiresManualResolution");
-            _ = SystemProxyLeaseCoordinator.Restore(leasePath, state.OwnerSid, ownerStore, dropExternalLease: true);
-        }
-        if (proxyRestore.Changed) NotifyProxyChanged();
-        var proxyAfterRestore = ProxySnapshot.Read();
+        var serviceWasRunning = !NativeServiceState.IsStopped(NativeServiceState.Read(ServiceName));
         InstallTransactionControl.RunScAllowStopped("stop", ServiceName);
         await WaitForServiceStoppedAsync(cancellationToken).ConfigureAwait(false);
         await WaitForOwnedPayloadExitAsync(cancellationToken).ConfigureAwait(false);
+        SystemProxyOperationReceipt proxyRestore;
+        try
+        {
+            proxyRestore = await UninstallRouteReturn.RestoreStoppedAsync(leasePath, state.OwnerSid,
+                new RegistrySystemProxyStore(state.OwnerSid), cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            // A real ownership/registry failure keeps the product recoverable.
+            // Do not leave its still-selected endpoint without its service.
+            if (serviceWasRunning && SystemProxyLeaseCoordinator.IsArtVpnEndpoint(new RegistrySystemProxyStore(state.OwnerSid).Read()))
+                InstallTransactionControl.RunSc("start", ServiceName);
+            throw;
+        }
+        if (proxyRestore.Changed) NotifyProxyChanged();
+        var proxyAfterRestore = ProxySnapshot.Read();
         InstallTransactionControl.RunSc("delete", ServiceName);
         await WaitForServiceDeletedAsync(cancellationToken).ConfigureAwait(false);
         RemoveOwnerStartup(state.OwnerSid);
@@ -1760,7 +1769,7 @@ internal static class ErrorCode
         {
             "AdministratorConsentCancelled" => "Разрешение администратора отменено. Установка не началась. Повторите, когда будете готовы.",
             "AdministratorRequired" => "Для установки фоновой службы нужны права администратора. Обратитесь к администратору компьютера.",
-            "UninstallReturnUnconfirmed" or "UninstallReturnRejected" => "Удаление остановлено: возврат прежнего VPN не подтверждён. Включите HAPP и повторите удаление. ART VPN пока сохранён.",
+            "UninstallReturnUnconfirmed" or "UninstallReturnRejected" => "Прежний VPN недоступен. При удалении ART VPN его собственные сетевые настройки будут отключены.",
             "RepairOwnershipRejected" => "Не удалось подтвердить владельца и файлы ART VPN. Автоматическое восстановление остановлено; чужую установку не изменяем.",
             "RepairStartupConflict" => "Запись автозапуска отличается от ART VPN. Не перезаписываем чужую команду; требуется проверка администратора.",
             "RepairServiceBusy" => "Служба сейчас запускается или останавливается. Дождитесь завершения и повторите проверку.",
